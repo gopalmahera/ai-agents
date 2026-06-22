@@ -1,0 +1,50 @@
+{
+  "receiver": "ai-alert-agent",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "PODCPULimitsUage>=90",
+        "severity": "critical",
+        "pod": "prometheus-gps-prometheus-0",
+        "namespace": "monitoring",
+        "container": "prometheus",
+        "cloud": "aws",
+        "region": "ap-south-1",
+        "stage": "sit",
+        "source": "prometheus"
+      },
+      "annotations": {
+        "summary": "POD CPU Uage >= 90",
+        "description": "Pod monitoring/prometheus-gps-prometheus-0 (prometheus) high CPU use on limit (reason: \"CPU use high > %90 of limit\")."
+      },
+      "startsAt": "2026-06-22T10:15:00.000Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "http://prometheus.sit.dozee.internal/graph?g0.expr=...",
+      "fingerprint": "b2c3d4e5f6g7h8i9"
+    }
+  ],
+  "groupLabels": {
+    "alertname": "PODCPULimitsUage>=90"
+  },
+  "commonLabels": {
+    "alertname": "PODCPULimitsUage>=90",
+    "severity": "critical",
+    "pod": "prometheus-gps-prometheus-0",
+    "namespace": "monitoring",
+    "container": "prometheus",
+    "cloud": "aws",
+    "region": "ap-south-1",
+    "stage": "sit",
+    "source": "prometheus"
+  },
+  "commonAnnotations": {
+    "summary": "POD CPU Uage >= 90",
+    "description": "Pod monitoring/prometheus-gps-prometheus-0 (prometheus) high CPU use on limit (reason: \"CPU use high > %90 of limit\")."
+  },
+  "externalURL": "http://alertmanager.sit.dozee.internal",
+  "version": "4",
+  "groupKey": "{}/{alertname=\"PODCPULimitsUage>=90\"}",
+  "truncatedAlerts": 0
+}

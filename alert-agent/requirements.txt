@@ -1,0 +1,5 @@
+flask
+openai
+pydantic-ai-slim[mcp]
+httpx
+requests
