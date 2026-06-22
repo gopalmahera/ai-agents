@@ -60,7 +60,11 @@ def _load_kube_config() -> None:
                 config_file=kubeconfig,
                 context=contexts[0]["name"],
             )
-    else:
+        return
+
+    try:
+        config.load_incluster_config()
+    except ConfigException:
         config.load_kube_config()
 
 

@@ -1,16 +1,17 @@
 services:
   alert-agent:
-    build: .
+    build:
+      context: .
+      platforms:
+        - linux/amd64
+    platform: linux/amd64
     ports:
       - "5001:5001"
     env_file:
       - .env
     volumes:
-      - ${KUBECONFIG_HOST_PATH}:/kube/config:ro
-      - ${AWS_CONFIG_HOST_PATH}:/root/.aws:ro
       - ./logs:/app/logs
     environment:
-      KUBECONFIG: /kube/config
       PROMETHEUS_URL: ${PROMETHEUS_URL}
       LOKI_URL: ${LOKI_URL}
       LOGS_DIR: /app/logs

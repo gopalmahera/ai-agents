@@ -3,7 +3,14 @@ from pathlib import Path
 from pydantic_ai import Agent
 from pydantic_ai.mcp import MCPServerStreamableHTTP
 
-from config import K8S_MCP_URL, LOKI_MCP_URL, OPENAI_MODEL, PROMETHEUS_MCP_URL
+from alert_context import build_alert_context
+from config import (
+    K8S_MCP_URL,
+    KAFKA_MCP_URL,
+    LOKI_MCP_URL,
+    OPENAI_MODEL,
+    PROMETHEUS_MCP_URL,
+)
 
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "rca_prompt.txt"
@@ -14,6 +21,7 @@ def _build_toolsets():
         MCPServerStreamableHTTP(K8S_MCP_URL, tool_prefix="k8s"),
         MCPServerStreamableHTTP(PROMETHEUS_MCP_URL, tool_prefix="prom"),
         MCPServerStreamableHTTP(LOKI_MCP_URL, tool_prefix="loki"),
+        MCPServerStreamableHTTP(KAFKA_MCP_URL, tool_prefix="kafka"),
     ]
 
 
@@ -29,9 +37,13 @@ def create_agent() -> Agent:
 
 async def run_investigation(alert: dict) -> str:
     agent = create_agent()
+    context = build_alert_context(alert)
 
     prompt = f"""
 Investigate this Alertmanager alert and produce an RCA using the required format.
+
+Resolved context:
+{context.to_prompt_block()}
 
 Alert JSON:
 {alert}

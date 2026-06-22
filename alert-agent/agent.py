@@ -23,7 +23,7 @@ def investigate_alert(alert: dict) -> None:
         print(rca)
         log_file = save_rca(alert, rca)
         print(f"RCA saved to {log_file}")
-        send_slack(rca)
+        send_slack(rca, alert=alert)
     except Exception:
         error_message = (
             f"Alert investigation failed for {alertname}.\n\n"
@@ -31,6 +31,6 @@ def investigate_alert(alert: dict) -> None:
         )
         print(error_message)
         try:
-            send_slack(error_message)
+            send_slack(error_message, alert=alert)
         except Exception:
             print("Failed to send Slack error notification.")

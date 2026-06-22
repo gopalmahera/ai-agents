@@ -1,4 +1,6 @@
 import os
+import re
+import time
 
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -11,4 +13,12 @@ PROMETHEUS_MCP_URL = os.getenv(
     "http://127.0.0.1:8002/mcp",
 )
 LOKI_MCP_URL = os.getenv("LOKI_MCP_URL", "http://127.0.0.1:8003/mcp")
+KAFKA_MCP_URL = os.getenv("KAFKA_MCP_URL", "http://127.0.0.1:8004/mcp")
 LOGS_DIR = os.getenv("LOGS_DIR", "/app/logs")
+
+DEDUP_TTL_SECONDS = int(os.getenv("DEDUP_TTL_SECONDS", "900"))
+ALLOWED_ALERTNAMES = os.getenv("ALLOWED_ALERTNAMES", "")
+
+_allowed_alertname_pattern: re.Pattern[str] | None = None
+if ALLOWED_ALERTNAMES:
+    _allowed_alertname_pattern = re.compile(ALLOWED_ALERTNAMES)

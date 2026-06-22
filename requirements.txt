@@ -1,8 +1,8 @@
 flask
+gunicorn
 openai
 pydantic-ai-slim[mcp]
 httpx
 requests
 mcp
 kubernetes
-awscli
