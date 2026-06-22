@@ -84,14 +84,20 @@ mcp = FastMCP(
 @mcp.tool()
 def get_namespaces():
     """Get all namespaces."""
-    namespaces = core_v1.list_namespace()
+    try:
+        namespaces = core_v1.list_namespace()
+    except client.exceptions.ApiException as exc:
+        return {"error": exc.reason, "status": exc.status, "body": exc.body}
     return [ns.metadata.name for ns in namespaces.items]
 
 
 @mcp.tool()
 def get_pods(namespace: str):
     """Get all pods in a namespace."""
-    pods = core_v1.list_namespaced_pod(namespace)
+    try:
+        pods = core_v1.list_namespaced_pod(namespace)
+    except client.exceptions.ApiException as exc:
+        return {"error": exc.reason, "status": exc.status, "body": exc.body}
     return [
         {
             "name": pod.metadata.name,

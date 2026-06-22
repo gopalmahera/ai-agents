@@ -15,7 +15,7 @@ Rules:
 - For resource_type=kubernetes: use k8s tools, logs, events, and relevant PromQL.
 - For resource_type=host (EC2Host*): use prom_get_node_* and prom_get_targets only; do not use k8s tools.
 - For resource_type=probe (Blackbox*, TLSCertificateExpiringSoon): use prom_get_probe_* tools; k8s tools only if hostname clearly maps to a known workload.
-- For resource_type=kafka (msk.*): use kafka_get_consumer_lag, kafka_get_topic_message_rate, then k8s/loki for consumer pods if identified.
+- For resource_type=kafka (msk.*): use alert job/topic/group_id from resolved context. job is msk-kbc or msk-kb. Pass alertname to kafka_get_consumer_lag and kafka_get_topic_message_rate when labels are sparse.
 - If namespace or pod is missing on kubernetes alerts, discover resources first.
 - For multi-container pods, use describe_pod to see container names.
 - If a tool returns an error, continue with other available evidence.

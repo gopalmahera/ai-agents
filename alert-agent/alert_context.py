@@ -71,6 +71,29 @@ def _resource_type(alertname: str) -> str:
     return "kubernetes"
 
 
+def _infer_msk_from_alertname(alertname: str) -> tuple[str | None, str | None, str | None]:
+    """Return (job, topic, group_id) parsed from msk.* alertnames."""
+    nomessage = re.match(r"^msk\.(kbc|kb)\.nomessage\.(.+?)\s*=\s*0", alertname)
+    if nomessage:
+        cluster, topic_suffix = nomessage.group(1), nomessage.group(2).strip()
+        topic = topic_suffix
+        if cluster == "kbc" and not topic.startswith("compute."):
+            topic = f"compute.{topic}"
+        return f"msk-{cluster}", topic, None
+
+    lag = re.match(r"^msk\.(kbc|kb)\.(.+?)\s*>\s*\d+", alertname)
+    if lag:
+        cluster, topic = lag.group(1), lag.group(2).strip()
+        return f"msk-{cluster}", topic, f"group.{topic}"
+
+    group_lag = re.match(r"^msk\.(kbc|kb)\.group\.(.+?)\s*>\s*\d+", alertname)
+    if group_lag:
+        cluster, topic = group_lag.group(1), group_lag.group(2).strip()
+        return f"msk-{cluster}", f"compute.{topic}", f"group.compute.{topic}"
+
+    return None, None, None
+
+
 def build_alert_context(alert: dict) -> AlertContext:
     labels = alert.get("labels", {})
     annotations = alert.get("annotations", {})
@@ -85,6 +108,12 @@ def build_alert_context(alert: dict) -> AlertContext:
     job = labels.get("job")
     topic = labels.get("topic")
     group_id = labels.get("groupId") or labels.get("group_id")
+
+    if resource_type == "kafka":
+        parsed_job, parsed_topic, parsed_group = _infer_msk_from_alertname(alertname)
+        job = job or parsed_job
+        topic = topic or parsed_topic
+        group_id = group_id or parsed_group
 
     if resource_type == "kubernetes" and pod and not namespace:
         description = annotations.get("description", "")

@@ -12,10 +12,10 @@ metadata:
   name: ai-alert-agent-role
 rules:
   - apiGroups: ['']
-    resources: ['namespaces', 'pods', 'pods/log', 'events']
+    resources: ['namespaces', 'pods', 'pods/log', 'pods/status', 'events']
     verbs: ['get', 'list', 'watch']
   - apiGroups: ['apps']
-    resources: ['deployments']
+    resources: ['deployments', 'replicasets']
     verbs: ['get', 'list', 'watch']
 
 ---
