@@ -1,8 +1,10 @@
 import asyncio
 import traceback
 
+from alert_context import build_alert_context
 from log_writer import save_rca
 from mcp_client import run_investigation
+from rca_formatter import format_rca
 from slack_client import send_slack
 
 
@@ -17,6 +19,8 @@ def investigate_alert(alert: dict) -> None:
 
     try:
         rca = asyncio.run(run_investigation(alert))
+        ctx = build_alert_context(alert)
+        rca = format_rca(rca, ctx)
         print("=" * 80)
         print(f"RCA for {alertname}")
         print("=" * 80)

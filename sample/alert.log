@@ -1,23 +1,27 @@
-Summary:
-- Prometheus pod monitoring/prometheus-gps-prometheus-0 is running and had no restarts.
-- The alert is consistent with the Prometheus container using about 0.355 CPU cores against a 1 core CPU limit at the time of query.
-- No pod events or logs evidence of crashes, evictions, or other failures was found from the collected data.
+*RCA — NetworkPodHighTransmit* | severity: warning
+Namespace: dozeedb | Pod: athenaworker-6f4cd88ccb-nl5vw
 
-Evidence:
-- k8s_describe_pod shows prometheus-gps-prometheus-0 is Running on node ip-10-2-56-211.ap-south-1.compute.internal.
-- k8s_get_pod_restart_count shows prometheus-gps-prometheus-0 has restarts: 0.
-- prom_query_promql returned rate(container_cpu_usage_seconds_total{namespace="monitoring",pod="prometheus-gps-prometheus-0",container="prometheus"}[5m]) = 0.3548032921726985.
-- prom_query_promql returned kube_pod_container_resource_limits{namespace="monitoring",pod="prometheus-gps-prometheus-0",container="prometheus",resource="cpu"} = 1 core.
-- k8s_get_logs could not be used without a container name; the pod has containers init-config-reloader, prometheus, and config-reloader.
-- k8s_get_pod_events returned no events for this pod.
+*Alert summary:*
+Pod outgoing network usage above 2MB/s threshold.
 
-Root Cause:
-The alert fired because the prometheus container in monitoring/prometheus-gps-prometheus-0 was consuming elevated CPU relative to its configured CPU limit. The collected metrics show roughly 0.355 CPU cores in use with a 1 core limit, which is enough to match the alert condition, and there is no evidence from pod status, restarts, or events that the pod was unhealthy or restarting.
+*Subject:*
+Namespace: dozeedb
+Pod: athenaworker-6f4cd88ccb-nl5vw
 
-Recommendation:
-- Check the Prometheus workload’s CPU usage trend and whether the current 1 core limit is sufficient for its normal load.
-- If needed, inspect logs for the prometheus container specifically to correlate the CPU spike with query or scrape load.
-- Review whether this alert is expected during peak monitoring activity for this environment.
+*Metrics:*
+• Transmit rate: 2.4 MB/s (threshold: >2 MB/s)
+• CPU usage: 120m / limit 500m (24%)
+• Memory usage: 256Mi / limit 512Mi (50%)
 
-Confidence:
-- Medium — the evidence clearly supports high relative CPU usage, but the exact trigger window and workload driver were not available from the collected data.
+*Findings:*
+• Pod is actively transmitting above the alert threshold.
+• No restarts or OOM events in the last hour.
+• No error patterns in recent logs.
+
+*Probable root cause:*
+Elevated outbound traffic from athenaworker is driving network transmit above the configured threshold.
+
+*Recommended actions:*
+1. Check downstream dependencies and batch job triggers for athenaworker.
+2. Review network metrics trend over the last 24h for a traffic spike.
+3. Scale replicas if sustained high transmit is expected load.

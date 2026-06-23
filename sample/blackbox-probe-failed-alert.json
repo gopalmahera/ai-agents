@@ -1,0 +1,21 @@
+{
+  "receiver": "ai-alert-agent",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "BlackboxProbeFailed",
+        "severity": "critical",
+        "namespace": "blackbox",
+        "instance": "https://api.example.com/health",
+        "module": "http_2xx"
+      },
+      "annotations": {
+        "summary": "Blackbox probe failed",
+        "description": "HTTP probe to https://api.example.com/health failed"
+      },
+      "fingerprint": "test-blackbox-1"
+    }
+  ]
+}

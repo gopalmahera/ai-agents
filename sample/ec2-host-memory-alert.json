@@ -1,0 +1,21 @@
+{
+  "receiver": "ai-alert-agent",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "EC2HostMemoryUnderMemoryPressure",
+        "severity": "warning",
+        "namespace": "ec2",
+        "pod": "kube-prometheus-stack-prometheus-node-exporter-dz6xn",
+        "instance": "10.1.65.118:9100"
+      },
+      "annotations": {
+        "summary": "EC2 host under memory pressure",
+        "description": "Major page faults above threshold on 10.1.65.118"
+      },
+      "fingerprint": "test-ec2-mem-1"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "receiver": "ai-alert-agent",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "msk.kbc.events.raw > 50000",
+        "severity": "warning",
+        "namespace": "msk",
+        "topic": "events.raw",
+        "groupId": "processor-v2",
+        "job": "msk-kbc"
+      },
+      "annotations": {
+        "summary": "MSK consumer lag high",
+        "description": "Consumer lag above 50000 for events.raw"
+      },
+      "fingerprint": "test-msk-lag-1"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "receiver": "ai-alert-agent",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "PodRestarting",
+        "severity": "warning",
+        "namespace": "production",
+        "pod": "api-server-7f8c9d",
+        "container": "api"
+      },
+      "annotations": {
+        "summary": "Pod restarting frequently",
+        "description": "Pod api-server-7f8c9d in namespace production restarted more than 3 times in 15m"
+      },
+      "fingerprint": "test-pod-restart-1"
+    }
+  ]
+}

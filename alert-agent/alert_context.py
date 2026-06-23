@@ -11,6 +11,8 @@ _NS_POD_RE = re.compile(
     re.IGNORECASE,
 )
 
+_FAKE_NAMESPACES = frozenset({"ec2", "blackbox", "msk", "kbc.msk", "kbcmsk"})
+
 
 @dataclass
 class AlertContext:
@@ -24,28 +26,40 @@ class AlertContext:
     job: str | None
     topic: str | None
     group_id: str | None
+    host_ip: str | None
+    scrape_instance: str | None
+    target: str | None
+    msk_job: str | None
 
     def to_prompt_block(self) -> str:
         lines = [
             f"alertname: {self.alertname}",
             f"resource_type: {self.resource_type}",
         ]
-        if self.namespace:
-            lines.append(f"namespace: {self.namespace}")
-        if self.pod:
-            lines.append(f"pod: {self.pod}")
-        if self.container:
-            lines.append(f"container: {self.container}")
-        if self.instance:
-            lines.append(f"instance: {self.instance}")
-        if self.module:
-            lines.append(f"module: {self.module}")
-        if self.job:
-            lines.append(f"job: {self.job}")
-        if self.topic:
-            lines.append(f"topic: {self.topic}")
-        if self.group_id:
-            lines.append(f"group_id: {self.group_id}")
+        if self.resource_type == "kubernetes":
+            if self.namespace:
+                lines.append(f"namespace: {self.namespace}")
+            if self.pod:
+                lines.append(f"pod: {self.pod}")
+            if self.container:
+                lines.append(f"container: {self.container}")
+        elif self.resource_type == "host":
+            if self.host_ip:
+                lines.append(f"host_ip: {self.host_ip}")
+            if self.scrape_instance:
+                lines.append(f"scrape_instance: {self.scrape_instance}")
+        elif self.resource_type == "probe":
+            if self.target:
+                lines.append(f"target: {self.target}")
+            if self.module:
+                lines.append(f"module: {self.module}")
+        elif self.resource_type == "kafka":
+            if self.topic:
+                lines.append(f"topic: {self.topic}")
+            if self.group_id:
+                lines.append(f"group_id: {self.group_id}")
+            if self.msk_job:
+                lines.append(f"msk_job: {self.msk_job}")
         return "\n".join(lines)
 
 
@@ -69,6 +83,14 @@ def _resource_type(alertname: str) -> str:
     if alertname.startswith("msk."):
         return "kafka"
     return "kubernetes"
+
+
+def _host_ip(instance: str | None) -> str | None:
+    if not instance:
+        return None
+    if ":" in instance:
+        return instance.rsplit(":", 1)[0]
+    return instance
 
 
 def _infer_msk_from_alertname(alertname: str) -> tuple[str | None, str | None, str | None]:
@@ -109,6 +131,9 @@ def build_alert_context(alert: dict) -> AlertContext:
     topic = labels.get("topic")
     group_id = labels.get("groupId") or labels.get("group_id")
 
+    if namespace and namespace.lower() in _FAKE_NAMESPACES:
+        namespace = None
+
     if resource_type == "kafka":
         parsed_job, parsed_topic, parsed_group = _infer_msk_from_alertname(alertname)
         job = job or parsed_job
@@ -120,10 +145,17 @@ def build_alert_context(alert: dict) -> AlertContext:
         parsed_ns, parsed_pod = _parse_from_description(description)
         namespace = namespace or parsed_ns
         pod = pod or parsed_pod
+        if namespace and namespace.lower() in _FAKE_NAMESPACES:
+            namespace = None
 
     if resource_type in ("host", "probe", "kafka"):
         namespace = None
         pod = None
+
+    host_ip = _host_ip(instance) if resource_type == "host" else None
+    scrape_instance = instance if resource_type == "host" else None
+    target = instance if resource_type == "probe" else None
+    msk_job = job if resource_type == "kafka" else None
 
     return AlertContext(
         alertname=alertname,
@@ -136,4 +168,8 @@ def build_alert_context(alert: dict) -> AlertContext:
         job=job,
         topic=topic,
         group_id=group_id,
+        host_ip=host_ip,
+        scrape_instance=scrape_instance,
+        target=target,
+        msk_job=msk_job,
     )
