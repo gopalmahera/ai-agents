@@ -29,6 +29,97 @@ def _instance_filter(instance: str) -> str:
     return f'instance="{escaped}"'
 
 
+def _first_scalar(result: dict) -> float | None:
+    data = result.get("data", {})
+    if data.get("resultType") != "vector":
+        return None
+    results = data.get("result", [])
+    if not results:
+        return None
+    value = results[0].get("value")
+    if not value or len(value) < 2:
+        return None
+    try:
+        return float(value[1])
+    except (TypeError, ValueError):
+        return None
+
+
+def _fetch_node_up(instance: str, job: str | None = None) -> dict:
+    inst = _instance_filter(instance)
+    if job:
+        escaped_job = job.replace("\\", "\\\\").replace('"', '\\"')
+        raw = _query(f'up{{job="{escaped_job}",{inst}}}')
+    else:
+        raw = _query(f"up{{{inst}}}")
+    results = raw.get("data", {}).get("result", [])
+    if not results:
+        return {"up": None, "job": None, "raw": raw}
+    labels = results[0].get("metric", {})
+    try:
+        up_val = float(results[0]["value"][1])
+    except (KeyError, TypeError, ValueError):
+        up_val = None
+    return {"up": up_val, "job": labels.get("job"), "raw": raw}
+
+
+def _fetch_node_memory(instance: str) -> dict:
+    inst = _instance_filter(instance)
+    available = _first_scalar(_query(f"node_memory_MemAvailable_bytes{{{inst}}}"))
+    free = _first_scalar(_query(f"node_memory_MemFree_bytes{{{inst}}}"))
+    total = _first_scalar(_query(f"node_memory_MemTotal_bytes{{{inst}}}"))
+    page_faults = _first_scalar(_query(f"rate(node_vmstat_pgmajfault{{{inst}}}[5m])"))
+
+    memory_source = "unavailable"
+    avail_bytes = None
+    avail_percent = None
+
+    if available is not None and total:
+        memory_source = "MemAvailable"
+        avail_bytes = available
+        avail_percent = 100 * available / total
+    elif free is not None and total:
+        memory_source = "MemFree"
+        avail_bytes = free
+        avail_percent = 100 * free / total
+
+    return {
+        "available_bytes": avail_bytes,
+        "free_bytes": free,
+        "total_bytes": total,
+        "available_percent": avail_percent,
+        "memory_source": memory_source,
+        "major_page_faults_per_sec": page_faults,
+    }
+
+
+def _fetch_ec2_host_snapshot(instance: str) -> dict:
+    inst = _instance_filter(instance)
+    memory = _fetch_node_memory(instance)
+    up_info = _fetch_node_up(instance)
+    cpu = _first_scalar(
+        _query(
+            f'100 - (avg by(instance) (rate(node_cpu_seconds_total{{mode="idle",{inst}}}[5m])) * 100)'
+        )
+    )
+    load1 = _first_scalar(_query(f"node_load1{{{inst}}}"))
+    disk_pct = _first_scalar(
+        _query(
+            f"100 * node_filesystem_avail_bytes{{{inst},fstype!~'tmpfs|overlay'}} "
+            f"/ node_filesystem_size_bytes{{{inst},fstype!~'tmpfs|overlay'}}"
+        )
+    )
+    return {
+        "memory": memory,
+        "up": up_info.get("up"),
+        "scrape_job": up_info.get("job"),
+        "cpu_percent": cpu,
+        "load1": load1,
+        "disk_avail_percent": disk_pct,
+        "major_page_faults_per_sec": memory.get("major_page_faults_per_sec"),
+    }
+
+
 @mcp.tool()
 def query_promql(query: str):
     """Execute a PromQL query."""
@@ -58,10 +149,9 @@ def get_targets():
 
 
 @mcp.tool()
-def get_node_up(instance: str):
+def get_node_up(instance: str, job: str | None = None):
     """Check node-exporter scrape health for an EC2 host."""
-    inst = _instance_filter(instance)
-    return _query(f'up{{job="node-exporter",{inst}}}')
+    return _fetch_node_up(instance, job=job)
 
 
 @mcp.tool()
@@ -76,15 +166,13 @@ def get_node_cpu(instance: str):
 @mcp.tool()
 def get_node_memory(instance: str):
     """Get EC2 host memory available bytes and utilization percent."""
-    inst = _instance_filter(instance)
-    return {
-        "available_bytes": _query(f"node_memory_MemAvailable_bytes{{{inst}}}"),
-        "total_bytes": _query(f"node_memory_MemTotal_bytes{{{inst}}}"),
-        "available_percent": _query(
-            f"100 * node_memory_MemAvailable_bytes{{{inst}}} / node_memory_MemTotal_bytes{{{inst}}}"
-        ),
-        "major_page_faults": _query(f"rate(node_vmstat_pgmajfault{{{inst}}}[5m])"),
-    }
+    return _fetch_node_memory(instance)
+
+
+@mcp.tool()
+def get_ec2_host_snapshot(instance: str):
+    """Get EC2 host metrics snapshot: memory, CPU, disk, load, up, page faults."""
+    return _fetch_ec2_host_snapshot(instance)
 
 
 @mcp.tool()

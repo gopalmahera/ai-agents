@@ -2,6 +2,7 @@ import asyncio
 import traceback
 
 from alert_context import build_alert_context
+from host_metrics import prefetch_host_metrics
 from log_writer import save_rca
 from mcp_client import run_investigation
 from rca_formatter import format_rca
@@ -18,9 +19,10 @@ def investigate_alert(alert: dict) -> None:
         return
 
     try:
-        rca = asyncio.run(run_investigation(alert))
         ctx = build_alert_context(alert)
-        rca = format_rca(rca, ctx)
+        prefetched = prefetch_host_metrics(ctx, alert)
+        rca = asyncio.run(run_investigation(alert, prefetched=prefetched))
+        rca = format_rca(rca, ctx, prefetched=prefetched)
         print("=" * 80)
         print(f"RCA for {alertname}")
         print("=" * 80)

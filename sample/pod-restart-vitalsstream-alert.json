@@ -1,0 +1,22 @@
+{
+  "receiver": "ai-alert-agent",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "pod.restart.vitalsstream",
+        "severity": "critical",
+        "namespace": "msk",
+        "job": "msk-kb",
+        "topic": "wss.vitalsstream",
+        "groupId": "group.wss.vitalsstream"
+      },
+      "annotations": {
+        "summary": "Topic Lag on wss.vitalsstream",
+        "description": "Consumer Lag on group.wss.vitalsstream > 1000"
+      },
+      "fingerprint": "test-pod-restart-vitalsstream-1"
+    }
+  ]
+}

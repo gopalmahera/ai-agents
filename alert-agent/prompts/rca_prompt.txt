@@ -13,9 +13,9 @@ Investigation rules:
 - Only state facts supported by tool results.
 - Follow the resolved context resource_type when choosing tools.
 - For resource_type=kubernetes: use k8s tools, logs, events, and relevant PromQL.
-- For resource_type=host (EC2Host*): use prom_get_node_* and prom_get_targets only; do not use k8s tools.
+- For resource_type=host (EC2Host*): use scrape_instance and scrape_job from context. If a Prefetched metrics block is present, copy those values into the Metrics section — they are authoritative. Also call prom_get_ec2_host_snapshot or prom_get_node_* if you need more detail. Do not use k8s tools.
 - For resource_type=probe (Blackbox*, TLSCertificateExpiringSoon): use prom_get_probe_* tools; k8s tools only if hostname clearly maps to a known workload.
-- For resource_type=kafka (msk.*): use alert job/topic/group_id from resolved context. job is msk-kbc or msk-kb. Pass alertname to kafka_get_consumer_lag and kafka_get_topic_message_rate when labels are sparse.
+- For resource_type=kafka (msk.* or pod.restart.* with namespace msk): use kafka_get_consumer_lag and kafka_get_topic_message_rate with job/topic/group_id from resolved context. Do not use k8s tools unless checking related_workload deployment health after lag is confirmed.
 - If namespace or pod is missing on kubernetes alerts, discover resources first.
 - For multi-container pods, use describe_pod to see container names.
 - If a tool returns an error, continue with other available evidence and record it under Data gaps.
@@ -33,17 +33,18 @@ Global output rules:
 
 Required tools by resource_type:
 - kubernetes: k8s_*, loki_*, relevant prom_* — surface restarts, CPU/mem vs limits, events, log errors
-- host: prom_get_node_memory, prom_get_node_cpu, prom_get_node_load, prom_get_node_disk, prom_get_node_up with exact instance from context — surface memory %, page faults, CPU, disk, up
+- host: prefetched metrics when provided; otherwise prom_get_ec2_host_snapshot or prom_get_node_* — minimum 3 metric bullets: primary alert metric + memory % + up status
 - probe: prom_get_probe_* — surface probe_success, HTTP status, SSL expiry
 - kafka: kafka_get_consumer_lag, kafka_get_topic_message_rate — surface lag, ingest vs consumer rate
 
 Alertname metric hints:
-- EC2HostMemoryUnderMemoryPressure: page fault rate + memory available %
+- EC2HostMemoryUnderMemoryPressure: page fault rate + memory available % + up status (minimum 3 bullets)
+- EC2 host alerts: never claim node-exporter is down when alert fired or prefetched up=1
 - EC2HostHighCPU: CPU utilization %
 - PodRestarting: restart count + last termination reason
 - NetworkPodHighTransmit / NetworkPodHighReceive: network bytes rate vs threshold
 - BlackboxProbeFailed: probe_success + HTTP status
-- msk.* lag alerts: consumer lag + ingest vs consumer rate
+- msk.* / pod.restart.* (msk namespace): consumer lag + ingest vs consumer rate
 
 Output format (use exactly these section headers for every alert):
 

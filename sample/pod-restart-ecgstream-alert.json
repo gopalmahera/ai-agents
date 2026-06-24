@@ -1,0 +1,22 @@
+{
+  "receiver": "ai-alert-agent",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "pod.restart.ecgstream",
+        "severity": "critical",
+        "namespace": "msk",
+        "job": "msk-kb",
+        "topic": "misc.ecgstream",
+        "groupId": "group.misc.ecgstream"
+      },
+      "annotations": {
+        "summary": "Topic Lag on misc.ecgstream",
+        "description": "Consumer Lag on group.misc.ecgstream > 1000"
+      },
+      "fingerprint": "test-pod-restart-ecgstream-1"
+    }
+  ]
+}

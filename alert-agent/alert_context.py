@@ -1,3 +1,4 @@
+import copy
 import re
 from dataclasses import dataclass
 
@@ -11,7 +12,45 @@ _NS_POD_RE = re.compile(
     re.IGNORECASE,
 )
 
+_CONSUMER_LAG_DESC = re.compile(
+    r"Consumer Lag on (group\.[^\s>]+)",
+    re.IGNORECASE,
+)
+_TOPIC_LAG_SUMMARY = re.compile(
+    r"Topic Lag on ([^\s]+)",
+    re.IGNORECASE,
+)
+
+# Misnamed MSK lag alerts use alertname pod.restart.* with namespace label msk.
+_POD_RESTART_MSK_TOPICS: dict[str, tuple[str, str, str]] = {
+    "pod.restart.vitalsstream": ("msk-kb", "wss.vitalsstream", "group.wss.vitalsstream"),
+    "pod.restart.ecgstream": ("msk-kb", "misc.ecgstream", "group.misc.ecgstream"),
+    "pod.restart.vitals.kims": ("msk-kb", "wss.vitalsstream", "group.wss.vitals.kims"),
+}
+
+_POD_RESTART_WORKLOADS: dict[str, tuple[str, str]] = {
+    "pod.restart.ecgstream": ("dozeeplatform", "sse"),
+    "pod.restart.vitalsstream": ("dozeeplatform", "vitalswss"),
+    "pod.restart.vitals.kims": ("dozeeplatform", "kimsvitalsint"),
+}
+
 _FAKE_NAMESPACES = frozenset({"ec2", "blackbox", "msk", "kbc.msk", "kbcmsk"})
+
+_ALERT_VALUE_RE = re.compile(r"VALUE\s*=\s*([\d.]+)", re.IGNORECASE)
+_EC2_DEFAULT_SCRAPE_JOB = "AWSEC2NodeExporter"
+
+_EC2_PRIMARY_METRIC: dict[str, str] = {
+    "EC2HostMemoryUnderMemoryPressure": "major_page_faults_per_sec",
+    "EC2HostOutOfMemory": "memory_available_percent",
+    "EC2HostHighCpuLoad": "cpu_percent",
+    "EC2HostCpuStealNoisyNeighbor": "cpu_steal_percent",
+    "EC2HostUnusualNetworkThroughputIn": "network_receive_mbps",
+    "EC2HostUnusualNetworkThroughputOut": "network_transmit_mbps",
+    "EC2HostUnusualDiskReadRate": "disk_read_mbps",
+    "EC2HostUnusualDiskWriteRate": "disk_write_mbps",
+    "EC2HostOutOfDiskSpace": "disk_avail_percent",
+    "EC2HostDiskWillFillIn24Hours": "disk_avail_percent",
+}
 
 
 @dataclass
@@ -30,6 +69,11 @@ class AlertContext:
     scrape_instance: str | None
     target: str | None
     msk_job: str | None
+    workload_namespace: str | None
+    workload_deployment: str | None
+    scrape_job: str | None
+    alert_firing_value: float | None
+    primary_metric: str | None
 
     def to_prompt_block(self) -> str:
         lines = [
@@ -48,6 +92,15 @@ class AlertContext:
                 lines.append(f"host_ip: {self.host_ip}")
             if self.scrape_instance:
                 lines.append(f"scrape_instance: {self.scrape_instance}")
+            if self.scrape_job:
+                lines.append(f"scrape_job: {self.scrape_job}")
+            if self.primary_metric:
+                lines.append(f"primary_metric: {self.primary_metric}")
+            if self.alert_firing_value is not None:
+                lines.append(f"alert_firing_value: {self.alert_firing_value}")
+            lines.append(
+                "note: EC2 hosts use scrape job AWSEC2NodeExporter; alert firing proves node_exporter is reachable"
+            )
         elif self.resource_type == "probe":
             if self.target:
                 lines.append(f"target: {self.target}")
@@ -60,7 +113,29 @@ class AlertContext:
                 lines.append(f"group_id: {self.group_id}")
             if self.msk_job:
                 lines.append(f"msk_job: {self.msk_job}")
+            if self.workload_namespace and self.workload_deployment:
+                lines.append(
+                    f"related_workload: {self.workload_namespace}/{self.workload_deployment}"
+                )
+                lines.append(
+                    "note: alertname pod.restart.* with namespace msk is MSK consumer lag, not a pod restart"
+                )
         return "\n".join(lines)
+
+
+def _parse_alert_firing_value(annotations: dict) -> float | None:
+    description = annotations.get("description", "")
+    match = _ALERT_VALUE_RE.search(description)
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
+
+
+def _primary_metric_for_alert(alertname: str) -> str | None:
+    return _EC2_PRIMARY_METRIC.get(alertname)
 
 
 def _parse_from_description(description: str) -> tuple[str | None, str | None]:
@@ -75,14 +150,47 @@ def _parse_from_description(description: str) -> tuple[str | None, str | None]:
     return None, None
 
 
-def _resource_type(alertname: str) -> str:
+def _parse_kafka_from_annotations(
+    annotations: dict,
+) -> tuple[str | None, str | None]:
+    description = annotations.get("description", "")
+    summary = annotations.get("summary", "")
+    group_id = None
+    topic = None
+    match = _CONSUMER_LAG_DESC.search(description)
+    if match:
+        group_id = match.group(1)
+    match = _TOPIC_LAG_SUMMARY.search(summary)
+    if match:
+        topic = match.group(1)
+    return topic, group_id
+
+
+def _is_kafka_alert(alertname: str, labels: dict) -> bool:
+    if alertname.startswith("msk."):
+        return True
+    job = labels.get("job", "")
+    if job.startswith("msk-") and labels.get("topic"):
+        return True
+    if alertname.startswith("pod.restart.") and labels.get("namespace", "").lower() == "msk":
+        return True
+    return False
+
+
+def _resource_type(alertname: str, labels: dict) -> str:
+    if _is_kafka_alert(alertname, labels):
+        return "kafka"
     if alertname.startswith("EC2Host"):
         return "host"
     if alertname.startswith("Blackbox") or alertname == "TLSCertificateExpiringSoon":
         return "probe"
-    if alertname.startswith("msk."):
-        return "kafka"
     return "kubernetes"
+
+
+def _infer_msk_from_pod_restart_alertname(
+    alertname: str,
+) -> tuple[str | None, str | None, str | None]:
+    return _POD_RESTART_MSK_TOPICS.get(alertname, (None, None, None))
 
 
 def _host_ip(instance: str | None) -> str | None:
@@ -120,7 +228,7 @@ def build_alert_context(alert: dict) -> AlertContext:
     labels = alert.get("labels", {})
     annotations = alert.get("annotations", {})
     alertname = labels.get("alertname", "unknown")
-    resource_type = _resource_type(alertname)
+    resource_type = _resource_type(alertname, labels)
 
     namespace = labels.get("namespace")
     pod = labels.get("pod")
@@ -130,6 +238,8 @@ def build_alert_context(alert: dict) -> AlertContext:
     job = labels.get("job")
     topic = labels.get("topic")
     group_id = labels.get("groupId") or labels.get("group_id")
+    workload_namespace = None
+    workload_deployment = None
 
     if namespace and namespace.lower() in _FAKE_NAMESPACES:
         namespace = None
@@ -139,6 +249,21 @@ def build_alert_context(alert: dict) -> AlertContext:
         job = job or parsed_job
         topic = topic or parsed_topic
         group_id = group_id or parsed_group
+
+        if alertname.startswith("pod.restart."):
+            restart_job, restart_topic, restart_group = _infer_msk_from_pod_restart_alertname(
+                alertname
+            )
+            job = job or restart_job
+            topic = topic or restart_topic
+            group_id = group_id or restart_group
+            workload = _POD_RESTART_WORKLOADS.get(alertname)
+            if workload:
+                workload_namespace, workload_deployment = workload
+
+        ann_topic, ann_group = _parse_kafka_from_annotations(annotations)
+        topic = topic or ann_topic
+        group_id = group_id or ann_group
 
     if resource_type == "kubernetes" and pod and not namespace:
         description = annotations.get("description", "")
@@ -156,6 +281,14 @@ def build_alert_context(alert: dict) -> AlertContext:
     scrape_instance = instance if resource_type == "host" else None
     target = instance if resource_type == "probe" else None
     msk_job = job if resource_type == "kafka" else None
+    scrape_job = None
+    alert_firing_value = None
+    primary_metric = None
+
+    if resource_type == "host":
+        scrape_job = labels.get("job") or _EC2_DEFAULT_SCRAPE_JOB
+        alert_firing_value = _parse_alert_firing_value(annotations)
+        primary_metric = _primary_metric_for_alert(alertname)
 
     return AlertContext(
         alertname=alertname,
@@ -172,4 +305,20 @@ def build_alert_context(alert: dict) -> AlertContext:
         scrape_instance=scrape_instance,
         target=target,
         msk_job=msk_job,
+        workload_namespace=workload_namespace,
+        workload_deployment=workload_deployment,
+        scrape_job=scrape_job,
+        alert_firing_value=alert_firing_value,
+        primary_metric=primary_metric,
     )
+
+
+def alert_for_prompt(alert: dict, ctx: AlertContext) -> dict:
+    """Return a copy of the alert with misleading k8s labels removed for non-k8s types."""
+    sanitized = copy.deepcopy(alert)
+    if ctx.resource_type == "kubernetes":
+        return sanitized
+    labels = sanitized.setdefault("labels", {})
+    for key in ("namespace", "pod", "container"):
+        labels.pop(key, None)
+    return sanitized

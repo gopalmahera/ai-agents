@@ -12,8 +12,8 @@
         "instance": "10.1.65.118:9100"
       },
       "annotations": {
-        "summary": "EC2 host under memory pressure",
-        "description": "Major page faults above threshold on 10.1.65.118"
+        "summary": "Host memory under memory pressure (instance 10.1.65.118:9100)",
+        "description": "The node is under heavy memory pressure. High rate of major page faults\n  VALUE = 1423.2"
       },
       "fingerprint": "test-ec2-mem-1"
     }

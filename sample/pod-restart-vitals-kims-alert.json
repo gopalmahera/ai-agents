@@ -1,0 +1,22 @@
+{
+  "receiver": "ai-alert-agent",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "pod.restart.vitals.kims",
+        "severity": "critical",
+        "namespace": "msk",
+        "job": "msk-kb",
+        "topic": "wss.vitalsstream",
+        "groupId": "group.wss.vitals.kims"
+      },
+      "annotations": {
+        "summary": "Topic Lag on wss.vitalsstream",
+        "description": "Consumer Lag on group.wss.vitals.kims > 1000"
+      },
+      "fingerprint": "test-pod-restart-vitals-kims-1"
+    }
+  ]
+}
