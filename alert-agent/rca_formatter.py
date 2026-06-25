@@ -1,6 +1,7 @@
 import re
 
 from alert_context import AlertContext
+from host_metrics import build_findings_bullets, default_host_actions
 
 
 _REQUIRED_SECTIONS = [
@@ -30,6 +31,16 @@ _LEADING_SUBJECT = re.compile(
 _FALSE_EXPORTER_DOWN = re.compile(
     r"^[\s•\-]*.*\b(node.exporter|node-exporter|scrape)\b.*\b(down|not retrievable|unavailable|failure|failed|issues)\b.*$",
     re.MULTILINE | re.IGNORECASE,
+)
+
+_METRICS_SECTION = re.compile(
+    r"(\*Metrics:\*)(.*?)(?=\*Findings:\*|\*Data gaps:\*|\*Probable root cause:\*|\*Recommended actions:\*|\Z)",
+    re.DOTALL | re.IGNORECASE,
+)
+
+_FINDINGS_SECTION = re.compile(
+    r"(\*Findings:\*)(.*?)(?=\*Data gaps:\*|\*Probable root cause:\*|\*Recommended actions:\*|\Z)",
+    re.DOTALL | re.IGNORECASE,
 )
 
 _SECTION_ALIASES = {
@@ -93,15 +104,30 @@ def _missing_sections(text: str) -> list[str]:
 
 
 def _count_metric_bullets(text: str) -> int:
-    match = re.search(
-        r"\*Metrics:\*(.*?)(?=\*Findings:\*|\*Data gaps:\*|\*Probable root cause:\*|\Z)",
-        text,
-        re.DOTALL | re.IGNORECASE,
-    )
+    match = _METRICS_SECTION.search(text)
     if not match:
         return 0
-    section = match.group(1)
+    section = match.group(2)
     return len(re.findall(r"^[\s]*[•\-]\s+", section, re.MULTILINE))
+
+
+def _normalize_metric_key(line: str) -> str:
+    cleaned = re.sub(r"^[\s•\-]+", "", line.strip()).lower()
+    cleaned = re.sub(r"\s*\[from alert\]\s*$", "", cleaned)
+    cleaned = re.sub(r"\s*\(threshold[^)]*\)\s*$", "", cleaned)
+    return cleaned.split(":")[0].strip()
+
+
+def _dedupe_bullet_lines(lines: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for line in lines:
+        key = _normalize_metric_key(line)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(line)
+    return result
 
 
 def _strip_false_exporter_down(text: str, prefetched: dict | None) -> str:
@@ -115,45 +141,75 @@ def _strip_false_exporter_down(text: str, prefetched: dict | None) -> str:
     return "\n".join(line for line in lines if not _FALSE_EXPORTER_DOWN.match(line))
 
 
+def _should_remove_data_gaps(text: str, prefetched: dict | None) -> bool:
+    if not prefetched:
+        return False
+    if prefetched.get("up") == 1:
+        return True
+    if prefetched.get("alert_valid") and _count_metric_bullets(text) >= 1:
+        snapshot = prefetched.get("snapshot") or {}
+        if snapshot.get("major_page_faults_per_sec") is not None or prefetched.get("bullets"):
+            return _count_metric_bullets(text) >= 3
+    return _count_metric_bullets(text) >= 3
+
+
 def _remove_redundant_data_gaps(text: str, prefetched: dict | None) -> str:
-    if not prefetched or not prefetched.get("bullets"):
+    if not _should_remove_data_gaps(text, prefetched):
         return text
-    if _count_metric_bullets(text) >= 3:
+    return re.sub(
+        r"\*Data gaps:\*.*?(?=\*Probable root cause:\*|\*Recommended actions:\*|\Z)",
+        "",
+        text,
+        flags=re.DOTALL | re.IGNORECASE,
+    ).strip()
+
+
+def _replace_metrics_section(text: str, bullets: list[str]) -> str:
+    if not bullets:
+        return text
+    bullet_lines = "\n".join(f"• {b}" for b in _dedupe_bullet_lines(bullets))
+    if _METRICS_SECTION.search(text):
+        return _METRICS_SECTION.sub(rf"\1\n{bullet_lines}\n", text, count=1)
+    if re.search(r"\*Subject:\*", text, re.IGNORECASE):
         return re.sub(
-            r"\*Data gaps:\*.*?(?=\*Probable root cause:\*|\*Recommended actions:\*|\Z)",
-            "",
+            r"(\*Subject:\*.*?)(\n\*Findings:\*|\n\*Data gaps:\*|\n\*Probable root cause:\*|\Z)",
+            rf"\1\n\n*Metrics:*\n{bullet_lines}\2",
             text,
+            count=1,
             flags=re.DOTALL | re.IGNORECASE,
-        ).strip()
-    return text
+        )
+    return f"*Metrics:*\n{bullet_lines}\n\n{text}"
 
 
-def _inject_prefetched_metrics(text: str, prefetched: dict | None, ctx: AlertContext) -> str:
+def _inject_findings(text: str, prefetched: dict | None, ctx: AlertContext) -> str:
+    findings = list((prefetched or {}).get("findings") or [])
+    if not findings and prefetched:
+        findings = build_findings_bullets(ctx, prefetched)
+    if not findings:
+        return text
+
+    if re.search(r"\*Findings:\*", text, re.IGNORECASE):
+        return text
+
+    bullet_lines = "\n".join(f"• {f}" for f in findings)
+    if _METRICS_SECTION.search(text):
+        return re.sub(
+            r"(\*Metrics:\*.*?)(\n\*Data gaps:\*|\n\*Probable root cause:\*|\n\*Recommended actions:\*|\Z)",
+            rf"\1\n\n*Findings:*\n{bullet_lines}\2",
+            text,
+            count=1,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+    return f"{text}\n\n*Findings:*\n{bullet_lines}"
+
+
+def _merge_prefetched_metrics(text: str, prefetched: dict | None, ctx: AlertContext) -> str:
     if not prefetched or ctx.resource_type != "host":
         return text
     bullets = prefetched.get("bullets") or []
     if not bullets:
         return text
-
-    existing = _count_metric_bullets(text)
-    if existing >= 3:
-        return text
-
-    bullet_lines = "\n".join(f"• {b}" for b in bullets)
-    metrics_match = re.search(r"\*Metrics:\*", text, re.IGNORECASE)
-    if metrics_match:
-        insert_at = metrics_match.end()
-        return text[:insert_at] + "\n" + bullet_lines + text[insert_at:]
-
-    summary_match = re.search(r"\*Alert summary:\*", text, re.IGNORECASE)
-    if summary_match:
-        block = f"\n\n*Metrics:*\n{bullet_lines}"
-        end = text.find("\n", summary_match.end())
-        if end == -1:
-            return text + block
-        return text[: end + 1] + block + text[end + 1 :]
-
-    return f"*Metrics:*\n{bullet_lines}\n\n{text}"
+    return _replace_metrics_section(text, bullets)
 
 
 def format_rca(
@@ -168,17 +224,13 @@ def format_rca(
     text = _normalize_section_headers(text)
     text = _normalize_bullets(text)
     text = _strip_false_exporter_down(text, prefetched)
-    text = _inject_prefetched_metrics(text, prefetched, ctx)
+    text = _merge_prefetched_metrics(text, prefetched, ctx)
+    text = _inject_findings(text, prefetched, ctx)
     text = _remove_redundant_data_gaps(text, prefetched)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
 
     missing = _missing_sections(text)
     if missing:
         text = f"[structure incomplete: missing {', '.join(missing)}]\n\n{text}"
-
-    if ctx.resource_type == "host" and prefetched:
-        metric_count = _count_metric_bullets(text)
-        if metric_count < 2 and prefetched.get("bullets"):
-            text = f"[metrics incomplete]\n\n{text}"
 
     return text

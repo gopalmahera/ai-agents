@@ -14,6 +14,14 @@ _EC2_ALERT_THRESHOLDS: dict[str, str] = {
     "EC2HostHighCpuLoad": "threshold > 80%",
 }
 
+_EC2_ACTIONS: dict[str, list[str]] = {
+    "EC2HostMemoryUnderMemoryPressure": [
+        "SSH to the host and run `free -h` and `ps aux --sort=-%mem | head` to find top memory consumers.",
+        "Restart or scale the heaviest memory consumer, or increase instance memory if pressure is sustained.",
+        "Monitor page fault rate and memory available over the next hour to confirm recovery.",
+    ],
+}
+
 
 def _query_promql(query: str) -> dict:
     response = requests.get(
@@ -44,6 +52,61 @@ def _first_scalar(result: dict) -> float | None:
         return float(value[1])
     except (TypeError, ValueError):
         return None
+
+
+def _has_up_metric(instance: str) -> bool:
+    inst = _instance_filter(instance)
+    raw = _query_promql(f"up{{{inst}}}")
+    return bool(raw.get("data", {}).get("result"))
+
+
+def _discover_instance_by_host_ip(host_ip: str) -> str | None:
+    raw = _query_promql(f'up{{job="{_EC2_DEFAULT_SCRAPE_JOB}"}}')
+    results = raw.get("data", {}).get("result", [])
+    for item in results:
+        instance = item.get("metric", {}).get("instance", "")
+        if host_ip in instance:
+            return instance
+    return None
+
+
+def resolve_scrape_instance(
+    alert_instance: str | None,
+    host_ip: str | None,
+) -> tuple[str | None, str]:
+    """Return (resolved_instance, resolution_method)."""
+    if not alert_instance and not host_ip:
+        return None, "none"
+
+    candidates: list[tuple[str, str]] = []
+    if alert_instance:
+        candidates.append((alert_instance, "exact"))
+        if ":" not in alert_instance and host_ip:
+            candidates.append((f"{alert_instance}:9100", "variant_port"))
+        if host_ip and alert_instance != host_ip:
+            candidates.append((host_ip, "variant_ip"))
+            candidates.append((f"{host_ip}:9100", "variant_ip_port"))
+
+    seen: set[str] = set()
+    for instance, method in candidates:
+        if instance in seen:
+            continue
+        seen.add(instance)
+        try:
+            if _has_up_metric(instance):
+                return instance, method
+        except requests.RequestException:
+            continue
+
+    if host_ip:
+        try:
+            discovered = _discover_instance_by_host_ip(host_ip)
+            if discovered:
+                return discovered, "discovered"
+        except requests.RequestException:
+            pass
+
+    return alert_instance or host_ip, "unresolved"
 
 
 def _fetch_node_up(instance: str) -> dict:
@@ -127,16 +190,16 @@ def _build_metric_bullets(ctx: AlertContext, snapshot: dict) -> list[str]:
     threshold = _EC2_ALERT_THRESHOLDS.get(ctx.alertname, "")
 
     page_faults = snapshot.get("major_page_faults_per_sec")
+    from_alert = False
     if page_faults is None and ctx.alert_firing_value is not None:
         if ctx.primary_metric == "major_page_faults_per_sec":
             page_faults = ctx.alert_firing_value
+            from_alert = True
     if page_faults is not None:
         suffix = f" ({threshold})" if threshold and "page" in (ctx.primary_metric or "") else ""
         if not suffix and ctx.alertname == "EC2HostMemoryUnderMemoryPressure":
             suffix = " (threshold > 1000/s)"
-        source = ""
-        if page_faults == ctx.alert_firing_value and snapshot.get("major_page_faults_per_sec") is None:
-            source = " [from alert]"
+        source = " [from alert]" if from_alert else ""
         bullets.append(f"Major page faults: {page_faults:.1f}/s{suffix}{source}")
 
     avail_pct = memory.get("available_percent")
@@ -169,50 +232,103 @@ def _build_metric_bullets(ctx: AlertContext, snapshot: dict) -> list[str]:
     return bullets
 
 
+def build_findings_bullets(ctx: AlertContext, prefetched: dict | None) -> list[str]:
+    if not prefetched:
+        return []
+
+    findings: list[str] = []
+    snapshot = prefetched.get("snapshot") or {}
+    memory = snapshot.get("memory", {})
+
+    page_faults = snapshot.get("major_page_faults_per_sec")
+    if page_faults is None and ctx.alert_firing_value is not None:
+        page_faults = ctx.alert_firing_value
+    if page_faults is not None and ctx.alertname == "EC2HostMemoryUnderMemoryPressure":
+        findings.append(
+            f"Page faults at {page_faults:.1f}/s exceed threshold — host is under memory pressure."
+        )
+
+    avail_pct = memory.get("available_percent")
+    if avail_pct is not None:
+        findings.append(f"Memory available is {avail_pct:.1f}% on host {ctx.host_ip or ctx.scrape_instance}.")
+
+    up_val = prefetched.get("up")
+    if up_val == 1:
+        job = snapshot.get("scrape_job") or ctx.scrape_job or _EC2_DEFAULT_SCRAPE_JOB
+        findings.append(f"Scrape target is healthy (up=1, job: {job}).")
+    elif prefetched.get("alert_valid"):
+        host = ctx.host_ip or ctx.scrape_instance or "host"
+        findings.append(
+            f"Alert fired from node_exporter metrics on {host}; scrape is working for the alert condition."
+        )
+        if not memory.get("available_percent"):
+            findings.append(
+                f"Additional memory/CPU metrics were unavailable from Prometheus for {host}."
+            )
+
+    return findings
+
+
+def _fallback_bullets_from_alert(ctx: AlertContext) -> list[str]:
+    if ctx.alert_firing_value is None or ctx.primary_metric != "major_page_faults_per_sec":
+        return []
+    return [
+        f"Major page faults: {ctx.alert_firing_value:.1f}/s (threshold > 1000/s) [from alert]"
+    ]
+
+
 def prefetch_host_metrics(ctx: AlertContext, alert: dict) -> dict | None:
     if ctx.resource_type != "host":
         return None
 
-    instance = ctx.scrape_instance or ctx.instance
-    if not instance:
-        bullets = []
-        if ctx.alert_firing_value is not None and ctx.primary_metric == "major_page_faults_per_sec":
-            bullets.append(
-                f"Major page faults: {ctx.alert_firing_value:.1f}/s (threshold > 1000/s) [from alert]"
-            )
+    alert_instance = ctx.scrape_instance or ctx.instance
+    resolved, resolution = resolve_scrape_instance(alert_instance, ctx.host_ip)
+
+    if not resolved:
+        bullets = _fallback_bullets_from_alert(ctx)
         return {
             "instance": None,
+            "resolved_instance": None,
+            "instance_resolution": resolution,
             "snapshot": {},
             "bullets": bullets,
+            "findings": build_findings_bullets(ctx, {"alert_valid": bool(bullets)}),
             "up": None,
             "alert_valid": ctx.alert_firing_value is not None,
         }
 
     try:
-        snapshot = _fetch_ec2_host_snapshot(instance)
+        snapshot = _fetch_ec2_host_snapshot(resolved)
     except requests.RequestException as exc:
-        bullets = []
-        if ctx.alert_firing_value is not None and ctx.primary_metric == "major_page_faults_per_sec":
-            bullets.append(
-                f"Major page faults: {ctx.alert_firing_value:.1f}/s (threshold > 1000/s) [from alert]"
-            )
-        return {
-            "instance": instance,
+        bullets = _fallback_bullets_from_alert(ctx)
+        result = {
+            "instance": alert_instance,
+            "resolved_instance": resolved,
+            "instance_resolution": resolution,
             "snapshot": {},
             "bullets": bullets,
             "up": None,
             "error": str(exc),
             "alert_valid": ctx.alert_firing_value is not None,
         }
+        result["findings"] = build_findings_bullets(ctx, result)
+        return result
 
     bullets = _build_metric_bullets(ctx, snapshot)
-    return {
-        "instance": instance,
+    if not bullets and ctx.alert_firing_value is not None:
+        bullets = _fallback_bullets_from_alert(ctx)
+
+    result = {
+        "instance": alert_instance,
+        "resolved_instance": resolved,
+        "instance_resolution": resolution,
         "snapshot": snapshot,
         "bullets": bullets,
         "up": snapshot.get("up"),
         "alert_valid": ctx.alert_firing_value is not None or bool(bullets),
     }
+    result["findings"] = build_findings_bullets(ctx, result)
+    return result
 
 
 def prefetched_to_prompt_block(prefetched: dict | None) -> str:
@@ -221,8 +337,24 @@ def prefetched_to_prompt_block(prefetched: dict | None) -> str:
     lines = ["Prefetched metrics (authoritative — use these in the Metrics section):"]
     for bullet in prefetched["bullets"]:
         lines.append(f"• {bullet}")
+    if prefetched.get("findings"):
+        lines.append("")
+        lines.append("Prefetched findings (use in Findings section):")
+        for finding in prefetched["findings"]:
+            lines.append(f"• {finding}")
     if prefetched.get("alert_valid"):
         lines.append(
             "note: alert fired from node_exporter metrics — scrape is working; do not claim exporter is down"
         )
     return "\n".join(lines)
+
+
+def default_host_actions(ctx: AlertContext) -> list[str]:
+    return _EC2_ACTIONS.get(
+        ctx.alertname,
+        [
+            f"Investigate resource usage on host {ctx.host_ip or ctx.scrape_instance}.",
+            "Review recent changes or deployments that may have increased load.",
+            "Monitor host metrics over the next hour to confirm recovery.",
+        ],
+    )

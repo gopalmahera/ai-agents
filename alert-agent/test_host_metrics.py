@@ -5,7 +5,12 @@ from unittest.mock import MagicMock, patch
 sys.modules.setdefault("requests", MagicMock())
 
 from alert_context import AlertContext, build_alert_context
-from host_metrics import _build_metric_bullets, prefetch_host_metrics
+from host_metrics import (
+    _build_metric_bullets,
+    build_findings_bullets,
+    prefetch_host_metrics,
+    resolve_scrape_instance,
+)
 
 
 def _host_ctx(**kwargs) -> AlertContext:
@@ -32,6 +37,23 @@ def _host_ctx(**kwargs) -> AlertContext:
     }
     defaults.update(kwargs)
     return AlertContext(**defaults)
+
+
+class TestResolveScrapeInstance(unittest.TestCase):
+    @patch("host_metrics._has_up_metric")
+    def test_exact_match(self, mock_up):
+        mock_up.side_effect = lambda inst: inst == "10.1.64.41:9100"
+        resolved, method = resolve_scrape_instance("10.1.64.41:9100", "10.1.64.41")
+        self.assertEqual(resolved, "10.1.64.41:9100")
+        self.assertEqual(method, "exact")
+
+    @patch("host_metrics._discover_instance_by_host_ip")
+    @patch("host_metrics._has_up_metric", return_value=False)
+    def test_discovered_by_host_ip(self, _mock_up, mock_discover):
+        mock_discover.return_value = "10.1.64.41:9100"
+        resolved, method = resolve_scrape_instance("10.1.64.41", "10.1.64.41")
+        self.assertEqual(resolved, "10.1.64.41:9100")
+        self.assertEqual(method, "discovered")
 
 
 class TestBuildMetricBullets(unittest.TestCase):
@@ -67,9 +89,29 @@ class TestBuildMetricBullets(unittest.TestCase):
         self.assertTrue(any("1423.2" in b and "from alert" in b for b in bullets))
 
 
+class TestBuildFindingsBullets(unittest.TestCase):
+    def test_findings_from_prefetch(self):
+        ctx = _host_ctx()
+        prefetched = {
+            "up": 1.0,
+            "alert_valid": True,
+            "snapshot": {
+                "major_page_faults_per_sec": 2257.3,
+                "scrape_job": "AWSEC2NodeExporter",
+                "memory": {"available_percent": 11.0},
+            },
+        }
+        findings = build_findings_bullets(ctx, prefetched)
+        self.assertTrue(any("2257" in f for f in findings))
+        self.assertTrue(any("11.0%" in f for f in findings))
+        self.assertTrue(any("up=1" in f for f in findings))
+
+
 class TestPrefetchHostMetrics(unittest.TestCase):
     @patch("host_metrics._fetch_ec2_host_snapshot")
-    def test_prefetch_calls_prometheus(self, mock_fetch):
+    @patch("host_metrics.resolve_scrape_instance")
+    def test_prefetch_calls_prometheus(self, mock_resolve, mock_fetch):
+        mock_resolve.return_value = ("10.1.64.41:9100", "exact")
         mock_fetch.return_value = {
             "major_page_faults_per_sec": 1500.0,
             "memory": {
@@ -99,6 +141,7 @@ class TestPrefetchHostMetrics(unittest.TestCase):
         assert result is not None
         self.assertGreaterEqual(len(result["bullets"]), 3)
         self.assertEqual(result["up"], 1.0)
+        self.assertIn("findings", result)
         mock_fetch.assert_called_once_with("10.1.64.41:9100")
 
 

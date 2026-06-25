@@ -22,6 +22,7 @@ LOGS_DIR = os.getenv("LOGS_DIR", "/app/logs")
 
 DEDUP_TTL_SECONDS = int(os.getenv("DEDUP_TTL_SECONDS", "900"))
 ALLOWED_ALERTNAMES = os.getenv("ALLOWED_ALERTNAMES", "")
+LLM_ENABLED = os.getenv("LLM_ENABLED", "true").lower() in ("1", "true", "yes")
 
 _allowed_alertname_pattern: re.Pattern[str] | None = None
 if ALLOWED_ALERTNAMES:
