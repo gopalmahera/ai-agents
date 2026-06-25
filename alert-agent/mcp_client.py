@@ -11,7 +11,7 @@ from config import (
     OPENAI_MODEL,
     PROMETHEUS_MCP_URL,
 )
-from host_metrics import prefetched_to_prompt_block
+from prefetch import prefetched_to_prompt_block
 
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "rca_prompt.txt"

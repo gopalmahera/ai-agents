@@ -74,6 +74,9 @@ class AlertContext:
     scrape_job: str | None
     alert_firing_value: float | None
     primary_metric: str | None
+    region: str | None
+    cloud: str | None
+    stage: str | None
 
     def to_prompt_block(self) -> str:
         lines = [
@@ -87,6 +90,17 @@ class AlertContext:
                 lines.append(f"pod: {self.pod}")
             if self.container:
                 lines.append(f"container: {self.container}")
+            if self.region:
+                lines.append(f"region: {self.region}")
+            if self.cloud:
+                lines.append(f"cloud: {self.cloud}")
+            if self.stage:
+                lines.append(f"stage: {self.stage}")
+            if self.alertname in ("PODCPULimitsUage>=90", "PODMemoryLimitsUage>=90"):
+                lines.append(
+                    "note: prefetched pod metrics use the same PromQL as the alert rule; "
+                    "do not claim CPU/memory limits are missing when alert fired"
+                )
         elif self.resource_type == "host":
             if self.host_ip:
                 lines.append(f"host_ip: {self.host_ip}")
@@ -310,6 +324,9 @@ def build_alert_context(alert: dict) -> AlertContext:
         scrape_job=scrape_job,
         alert_firing_value=alert_firing_value,
         primary_metric=primary_metric,
+        region=labels.get("region"),
+        cloud=labels.get("cloud"),
+        stage=labels.get("stage"),
     )
 
 

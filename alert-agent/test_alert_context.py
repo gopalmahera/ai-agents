@@ -197,6 +197,26 @@ class TestAlertForPrompt(unittest.TestCase):
         self.assertEqual(ctx.primary_metric, "major_page_faults_per_sec")
         self.assertIn("scrape_job: AWSEC2NodeExporter", ctx.to_prompt_block())
 
+    def test_external_labels_on_context(self):
+        alert = _alert(
+            {
+                "alertname": "PODCPULimitsUage>=90",
+                "severity": "critical",
+                "namespace": "dozeeplatform",
+                "pod": "consumer-abc",
+                "container": "consumer",
+                "region": "ap-south-1",
+                "cloud": "aws",
+                "stage": "prod",
+            }
+        )
+        ctx = build_alert_context(alert)
+
+        self.assertEqual(ctx.region, "ap-south-1")
+        self.assertEqual(ctx.cloud, "aws")
+        self.assertEqual(ctx.stage, "prod")
+        self.assertIn("region: ap-south-1", ctx.to_prompt_block())
+
 
 if __name__ == "__main__":
     unittest.main()

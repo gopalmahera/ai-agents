@@ -34,6 +34,9 @@ def _host_ctx(**kwargs) -> AlertContext:
         "scrape_job": "AWSEC2NodeExporter",
         "alert_firing_value": 1423.2,
         "primary_metric": "major_page_faults_per_sec",
+        "region": None,
+        "cloud": None,
+        "stage": None,
     }
     defaults.update(kwargs)
     return AlertContext(**defaults)

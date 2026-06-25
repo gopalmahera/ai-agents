@@ -4,7 +4,7 @@ import traceback
 from alert_context import build_alert_context
 from config import LLM_ENABLED
 from deterministic_rca import build_deterministic_rca
-from host_metrics import prefetch_host_metrics
+from prefetch import build_prefetch
 from log_writer import save_rca
 from mcp_client import run_investigation
 from rca_formatter import format_rca
@@ -42,7 +42,7 @@ def investigate_alert(alert: dict) -> None:
         return
 
     ctx = build_alert_context(alert)
-    prefetched = prefetch_host_metrics(ctx, alert)
+    prefetched = build_prefetch(ctx, alert)
 
     try:
         rca = _run_rca(alert, ctx, prefetched)

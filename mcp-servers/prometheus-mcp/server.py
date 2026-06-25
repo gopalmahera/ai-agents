@@ -269,5 +269,71 @@ def get_probe_phase(instance: str):
     return _query(f'probe_http_duration_seconds{{job="blackbox-exporter",{inst}}}')
 
 
+def _pod_labels_filter(namespace: str, pod: str, container: str) -> str:
+    ns = namespace.replace("\\", "\\\\").replace('"', '\\"')
+    pod_esc = pod.replace("\\", "\\\\").replace('"', '\\"')
+    cont = container.replace("\\", "\\\\").replace('"', '\\"')
+    return f'namespace="{ns}",pod="{pod_esc}",container="{cont}"'
+
+
+def _fetch_pod_cpu_snapshot(namespace: str, pod: str, container: str) -> dict:
+    labels = _pod_labels_filter(namespace, pod, container)
+    usage = _first_scalar(
+        _query(f"sum(rate(container_cpu_usage_seconds_total{{{labels}}}[5m]))")
+    )
+    limit = _first_scalar(
+        _query(
+            f"sum(cluster:namespace:pod_cpu:active:kube_pod_container_resource_limits{{{labels}}})"
+        )
+    )
+    pct = round(100 * usage / limit, 1) if usage is not None and limit else None
+    restarts = _first_scalar(
+        _query(f"sum(kube_pod_container_status_restarts_total{{{labels}}})")
+    )
+    return {
+        "usage_cores": usage,
+        "limit_cores": limit,
+        "usage_percent": pct,
+        "restarts": restarts,
+        "resource": "cpu",
+    }
+
+
+def _fetch_pod_memory_snapshot(namespace: str, pod: str, container: str) -> dict:
+    labels = _pod_labels_filter(namespace, pod, container)
+    working_set = _first_scalar(
+        _query(f"sum(container_memory_working_set_bytes{{{labels}}})")
+    )
+    limit = _first_scalar(
+        _query(
+            "sum(cluster:namespace:pod_memory:active:kube_pod_container_resource_limits"
+            f"{{{labels}}})"
+        )
+    )
+    pct = round(100 * working_set / limit, 1) if working_set is not None and limit else None
+    restarts = _first_scalar(
+        _query(f"sum(kube_pod_container_status_restarts_total{{{labels}}})")
+    )
+    return {
+        "usage_bytes": working_set,
+        "limit_bytes": limit,
+        "usage_percent": pct,
+        "restarts": restarts,
+        "resource": "memory",
+    }
+
+
+@mcp.tool()
+def get_pod_cpu_snapshot(namespace: str, pod: str, container: str):
+    """Get pod CPU usage, limit, percent of limit, and restarts."""
+    return _fetch_pod_cpu_snapshot(namespace, pod, container)
+
+
+@mcp.tool()
+def get_pod_memory_snapshot(namespace: str, pod: str, container: str):
+    """Get pod memory working set, limit, percent of limit, and restarts."""
+    return _fetch_pod_memory_snapshot(namespace, pod, container)
+
+
 if __name__ == "__main__":
     mcp.run(transport="streamable-http")

@@ -25,6 +25,9 @@ def _host_ctx() -> AlertContext:
         scrape_job="AWSEC2NodeExporter",
         alert_firing_value=2257.3,
         primary_metric="major_page_faults_per_sec",
+        region=None,
+        cloud=None,
+        stage=None,
     )
 
 
@@ -84,6 +87,92 @@ class TestRcaFormatterHost(unittest.TestCase):
         rca_with_gaps = THIN_RCA + "\n\n*Data gaps:*\n• Missing memory"
         result = format_rca(rca_with_gaps, ctx, prefetched=PREFETCHED)
         self.assertNotIn("*Data gaps:*", result)
+
+
+def _k8s_ctx() -> AlertContext:
+    return AlertContext(
+        alertname="PODCPULimitsUage>=90",
+        resource_type="kubernetes",
+        namespace="dozeeplatform",
+        pod="consumer-abc",
+        container="consumer",
+        instance=None,
+        module=None,
+        job=None,
+        topic=None,
+        group_id=None,
+        host_ip=None,
+        scrape_instance=None,
+        target=None,
+        msk_job=None,
+        workload_namespace=None,
+        workload_deployment=None,
+        scrape_job=None,
+        alert_firing_value=None,
+        primary_metric=None,
+        region="ap-south-1",
+        cloud="aws",
+        stage="prod",
+    )
+
+
+POD_PREFETCHED = {
+    "bullets": [
+        "CPU usage % of limit: 92% (threshold >= 90%)",
+        "CPU usage rate: 0.181 cores (5m avg)",
+        "CPU limit: 200m (0.200 cores)",
+        "Container restarts: 0",
+    ],
+    "findings": [
+        "Container consumer is at 92% of its CPU limit — alert condition confirmed.",
+        "Workload stable since last ReplicaSet change (4d 17h ago).",
+    ],
+    "alert_meaning": "Pod container CPU usage reached ≥90% of its configured CPU limit for 5+ minutes.",
+    "workload_bullets": [
+        "Region: ap-south-1 | cloud: aws | stage: prod",
+        "Deployment: dozeeplatform/request-rawfiles-consumer",
+        "Last ReplicaSet change: 4d 17h ago",
+    ],
+    "alert_valid": True,
+    "snapshot": {"resource": "cpu", "usage_percent": 92.0},
+}
+
+
+THIN_POD_RCA = """*Alert summary:*
+CPU high on pod.
+
+*Subject:*
+Namespace: dozeeplatform
+Pod: consumer-abc
+
+*Metrics:*
+• CPU usage rate: 0.181 cores/sec
+
+*Probable root cause:*
+Missing CPU limits may be misconfigured.
+
+*Recommended actions:*
+1. Add limits
+2. Check config
+3. Restart pod
+"""
+
+
+class TestRcaFormatterKubernetes(unittest.TestCase):
+    def test_replaces_pod_metrics_and_injects_workload(self):
+        ctx = _k8s_ctx()
+        result = format_rca(THIN_POD_RCA, ctx, prefetched=POD_PREFETCHED)
+        self.assertIn("92%", result)
+        self.assertIn(":package: *Workload:*", result)
+        self.assertIn("Deployment: dozeeplatform/request-rawfiles-consumer", result)
+        self.assertIn(":mag: *What this alert means:*", result)
+        self.assertNotIn("Missing CPU limits", result)
+
+    def test_emoji_sections_applied(self):
+        ctx = _k8s_ctx()
+        result = format_rca(THIN_POD_RCA, ctx, prefetched=POD_PREFETCHED)
+        self.assertIn(":bar_chart: *Metrics:*", result)
+        self.assertIn(":clipboard: *Findings:*", result)
 
 
 if __name__ == "__main__":
