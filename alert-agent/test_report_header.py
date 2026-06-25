@@ -35,8 +35,8 @@ class TestReportHeader(unittest.TestCase):
     def test_uses_alertname_not_rca(self):
         labels = {"severity": "critical", "region": "ap-south-1", "cloud": "aws", "stage": "prod"}
         header = format_report_header(_k8s_ctx(), labels)
-        self.assertTrue(header.startswith("Alertname — PODCPULimitsUage>=90"))
-        self.assertNotIn("RCA", header)
+        self.assertTrue(header.startswith("RCA — PODCPULimitsUage>=90"))
+        self.assertNotIn("Alertname", header)
         self.assertIn("Region: ap-south-1", header)
         self.assertIn("Namespace: dozeeplatform", header)
 

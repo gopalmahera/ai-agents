@@ -1,6 +1,7 @@
 from alert_catalog import get_alert_meaning
 from alert_context import AlertContext
 from host_metrics import build_findings_bullets, default_host_actions
+from kafka_metrics import build_findings_bullets as build_kafka_findings_bullets
 from pod_metrics import build_findings_bullets as build_pod_findings_bullets
 
 _POD_RESOURCE_ALERTS = frozenset(
@@ -82,10 +83,96 @@ def _default_pod_actions(ctx: AlertContext) -> list[str]:
     ]
 
 
+def _kafka_summary(ctx: AlertContext) -> str:
+    return (
+        f"{ctx.alertname} alert fired due to consumer lag exceeding threshold of 1000."
+    )
+
+
+def _kafka_root_cause(ctx: AlertContext, prefetched: dict | None) -> str:
+    snapshot = (prefetched or {}).get("snapshot") or {}
+    lag = snapshot.get("consumer_lag")
+    rate = snapshot.get("topic_message_rate_5m")
+    group = ctx.group_id or "the consumer group"
+    topic = ctx.topic or "the topic"
+
+    if lag is not None and rate is not None:
+        return (
+            f"The consumer group for {topic} ({group}) is experiencing lag because it is "
+            f"unable to process the incoming message rate of {int(rate)} messages/5m. "
+            "This could be due to insufficient consumer processing capacity or "
+            "performance inefficiencies in handling the message workload."
+        )
+    if lag is not None:
+        return (
+            f"Consumer lag on {group} for topic {topic} is {int(lag)}, above the threshold."
+        )
+    return f"{ctx.alertname} indicates elevated consumer lag on {topic}."
+
+
+def _default_kafka_actions(ctx: AlertContext) -> list[str]:
+    group = ctx.group_id or "the consumer group"
+    return [
+        f"Scale up the consumer instances for {group} to handle the incoming message rate more effectively.",
+        "Investigate potential bottlenecks or inefficiencies in the consumer application code or configuration.",
+        "Monitor the consumer processing rate versus the topic message rate to identify and address any mismatches promptly.",
+    ]
+
+
 def build_deterministic_rca(ctx: AlertContext, prefetched: dict | None) -> str:
     if ctx.alertname in _POD_RESOURCE_ALERTS:
         return _build_pod_rca(ctx, prefetched)
+    if ctx.resource_type == "kafka":
+        return _build_kafka_rca(ctx, prefetched)
     return _build_host_rca(ctx, prefetched)
+
+
+def _build_kafka_rca(ctx: AlertContext, prefetched: dict | None) -> str:
+    lines = [
+        f"*Alert summary:*\n{_kafka_summary(ctx)}",
+        "",
+        "*Subject:*",
+    ]
+    if ctx.topic:
+        lines.append(f"Topic: {ctx.topic}")
+    if ctx.group_id:
+        lines.append(f"Consumer group: {ctx.group_id}")
+    if ctx.msk_job:
+        lines.append(f"MSK job: {ctx.msk_job}")
+
+    meaning = (prefetched or {}).get("alert_meaning") or get_alert_meaning(ctx.alertname)
+    if meaning:
+        lines.extend(["", "*What this alert means:*", meaning])
+
+    bullets = list((prefetched or {}).get("bullets") or [])
+    lines.extend(["", "*Metrics:*"])
+    if bullets:
+        lines.extend(f"• {b}" for b in bullets)
+    else:
+        lines.append("• No metrics prefetched")
+
+    workload_bullets = list((prefetched or {}).get("workload_bullets") or [])
+    if workload_bullets:
+        lines.extend(["", "*Workload:*"])
+        lines.extend(f"• {b}" for b in workload_bullets)
+
+    findings = list((prefetched or {}).get("findings") or [])
+    if not findings and prefetched:
+        findings = build_kafka_findings_bullets(ctx, prefetched)
+    lines.extend(["", "*Findings:*"])
+    if findings:
+        lines.extend(f"• {f}" for f in findings)
+    else:
+        lines.append("• Alert condition confirmed from available signals.")
+
+    lines.extend(["", "*Probable root cause:*", _kafka_root_cause(ctx, prefetched)])
+
+    actions = _default_kafka_actions(ctx)
+    lines.extend(["", "*Recommended actions:*"])
+    for idx, action in enumerate(actions[:3], start=1):
+        lines.append(f"{idx}. {action}")
+
+    return "\n".join(lines)
 
 
 def _build_pod_rca(ctx: AlertContext, prefetched: dict | None) -> str:

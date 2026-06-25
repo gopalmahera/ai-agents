@@ -1,14 +1,22 @@
 from alert_context import AlertContext
 from host_metrics import prefetch_host_metrics, prefetched_to_prompt_block as _host_prompt_block
+from kafka_context import prefetch_kafka_context
+from kafka_metrics import build_findings_bullets as build_kafka_findings_bullets
+from kafka_metrics import prefetch_kafka_metrics
 from pod_metrics import build_findings_bullets as build_pod_findings_bullets, prefetch_pod_metrics
 from workload_context import prefetch_workload_context
 
 
 def build_prefetch(ctx: AlertContext, alert: dict) -> dict | None:
-    metrics = prefetch_host_metrics(ctx, alert) or prefetch_pod_metrics(ctx, alert)
+    metrics = (
+        prefetch_host_metrics(ctx, alert)
+        or prefetch_pod_metrics(ctx, alert)
+        or prefetch_kafka_metrics(ctx, alert)
+    )
     workload = prefetch_workload_context(ctx, alert)
+    kafka_ctx = prefetch_kafka_context(ctx, alert)
 
-    if not metrics and not workload:
+    if not metrics and not workload and not kafka_ctx:
         return None
 
     result = metrics or {
@@ -18,14 +26,20 @@ def build_prefetch(ctx: AlertContext, alert: dict) -> dict | None:
         "alert_valid": False,
     }
 
-    if workload:
-        result["workload"] = workload
-        if workload.get("alert_meaning"):
-            result["alert_meaning"] = workload["alert_meaning"]
-        if workload.get("bullets"):
-            result["workload_bullets"] = list(workload["bullets"])
-        if result.get("snapshot", {}).get("resource") in ("cpu", "memory"):
-            result["findings"] = build_pod_findings_bullets(ctx, result)
+    context_block = workload or kafka_ctx
+    if context_block:
+        if context_block.get("alert_meaning"):
+            result["alert_meaning"] = context_block["alert_meaning"]
+        if context_block.get("bullets"):
+            result["workload_bullets"] = list(context_block["bullets"])
+        if workload:
+            result["workload"] = workload
+
+    snapshot = result.get("snapshot") or {}
+    if snapshot.get("resource") == "cpu" or snapshot.get("resource") == "memory":
+        result["findings"] = build_pod_findings_bullets(ctx, result)
+    elif snapshot.get("resource") == "kafka" and not result.get("findings"):
+        result["findings"] = build_kafka_findings_bullets(ctx, result)
 
     return result
 

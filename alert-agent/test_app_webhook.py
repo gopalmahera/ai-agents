@@ -114,11 +114,11 @@ class TestAppWebhook(unittest.TestCase):
 
     @patch("app.send_alert_status")
     @patch("app.threading.Thread")
-    def test_firing_sends_status_and_starts_investigation(self, mock_thread, mock_slack):
+    def test_firing_does_not_send_status_starts_investigation(self, mock_thread, mock_slack):
         mock_thread.return_value = MagicMock(start=MagicMock())
         response = self.client.post("/webhook", json=FIRING_WEBHOOK)
         self.assertEqual(response.status_code, 200)
-        mock_slack.assert_called_once()
+        mock_slack.assert_not_called()
         mock_thread.assert_called_once()
 
     @patch("app.send_alert_status")

@@ -3,6 +3,7 @@ import re
 from alert_catalog import get_alert_meaning
 from alert_context import AlertContext
 from host_metrics import build_findings_bullets, default_host_actions
+from kafka_metrics import build_findings_bullets as build_kafka_findings_bullets
 from pod_metrics import build_findings_bullets as build_pod_findings_bullets
 
 
@@ -178,6 +179,9 @@ def _should_remove_data_gaps(text: str, prefetched: dict | None) -> bool:
     if prefetched.get("up") == 1:
         return True
     snapshot = prefetched.get("snapshot") or {}
+    if snapshot.get("resource") == "kafka" and prefetched.get("alert_valid"):
+        if snapshot.get("consumer_lag") is not None or prefetched.get("bullets"):
+            return True
     if snapshot.get("resource") in ("cpu", "memory") and prefetched.get("alert_valid"):
         if snapshot.get("usage_percent") is not None or prefetched.get("bullets"):
             return True
@@ -292,6 +296,8 @@ def _inject_findings(text: str, prefetched: dict | None, ctx: AlertContext) -> s
         snapshot = prefetched.get("snapshot") or {}
         if snapshot.get("resource") in ("cpu", "memory"):
             findings = build_pod_findings_bullets(ctx, prefetched)
+        elif snapshot.get("resource") == "kafka":
+            findings = build_kafka_findings_bullets(ctx, prefetched)
         else:
             findings = build_findings_bullets(ctx, prefetched)
     if not findings:
@@ -321,7 +327,7 @@ def _inject_findings(text: str, prefetched: dict | None, ctx: AlertContext) -> s
 
 
 def _merge_prefetched_metrics(text: str, prefetched: dict | None, ctx: AlertContext) -> str:
-    if not prefetched or ctx.resource_type not in ("host", "kubernetes"):
+    if not prefetched or ctx.resource_type not in ("host", "kubernetes", "kafka"):
         return text
     bullets = prefetched.get("bullets") or []
     if not bullets:

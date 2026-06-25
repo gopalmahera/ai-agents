@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from slack_client import format_alert_status, send_alert_status
+from slack_client import format_alert_status, format_status_for_alert, send_alert_report, send_alert_status
 
 
 FIRING_PAYLOAD = {
@@ -45,6 +45,16 @@ class TestSlackClient(unittest.TestCase):
         }
         self.assertEqual(format_alert_status(payload), "[FIRING:2] PODCPULimitsUage>=90")
 
+    def test_status_for_single_alert(self):
+        alert = {
+            "status": "firing",
+            "labels": {"alertname": "pod.restart.vitalsstream", "severity": "critical"},
+        }
+        self.assertEqual(
+            format_status_for_alert(alert),
+            "[FIRING:1] pod.restart.vitalsstream",
+        )
+
     @patch("slack_client.requests.post")
     @patch("slack_client.SLACK_WEBHOOK_URL", "https://hooks.slack.com/test")
     def test_send_status_only(self, mock_post):
@@ -56,6 +66,27 @@ class TestSlackClient(unittest.TestCase):
         self.assertNotIn("RCA", text)
         self.assertNotIn("Region:", text)
         self.assertNotIn("Alertname", text)
+
+    @patch("slack_client.requests.post")
+    @patch("slack_client.SLACK_WEBHOOK_URL", "https://hooks.slack.com/test")
+    def test_send_full_report(self, mock_post):
+        mock_post.return_value = MagicMock(status_code=200, raise_for_status=MagicMock())
+        alert = {
+            "status": "firing",
+            "labels": {
+                "alertname": "pod.restart.vitalsstream",
+                "severity": "critical",
+            },
+        }
+        report = (
+            "RCA — pod.restart.vitalsstream | severity: critical\n\n"
+            "*Findings:*\n• lag high"
+        )
+        send_alert_report(alert, report)
+        text = mock_post.call_args.kwargs["json"]["attachments"][0]["text"]
+        self.assertTrue(text.startswith("RCA — pod.restart.vitalsstream"))
+        self.assertIn("*Findings:*", text)
+        self.assertNotIn("[FIRING:1]", text)
 
 
 if __name__ == "__main__":

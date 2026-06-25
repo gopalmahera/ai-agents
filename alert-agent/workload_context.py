@@ -50,7 +50,7 @@ def prefetch_workload_context(ctx: AlertContext, alert: dict) -> dict | None:
         suffix = f" ({ts})" if ts else ""
         bullets.append(f"Last ReplicaSet change: {rollout['rollout_age_human']} ago{suffix}")
 
-    meaning = get_alert_meaning(ctx.alertname)
+    meaning = get_alert_meaning(ctx.alertname, alert)
 
     return {
         "rollout": rollout,

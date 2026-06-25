@@ -56,12 +56,11 @@ def webhook():
     group_status = payload.get("status", "unknown")
     alerts = payload.get("alerts", [])
 
-    try:
-        send_alert_status(payload)
-    except Exception as exc:
-        print(f"Failed to send Slack status notification: {exc}")
-
     if group_status == "resolved":
+        try:
+            send_alert_status(payload)
+        except Exception as exc:
+            print(f"Failed to send Slack status notification: {exc}")
         print(f"Resolved webhook processed for {len(alerts)} alert(s)")
         return jsonify({"status": "ok", "alerts_received": len(alerts), "accepted": 0})
 

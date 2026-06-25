@@ -9,6 +9,7 @@ from log_writer import save_rca
 from mcp_client import run_investigation
 from rca_formatter import format_rca
 from report_header import format_report_header
+from slack_client import send_alert_report
 
 
 def _is_quota_error(exc: BaseException) -> bool:
@@ -42,6 +43,10 @@ def _save_report(alert: dict, ctx, body: str) -> None:
     print(report)
     log_file = save_rca(alert, report)
     print(f"Alert report saved to {log_file}")
+    try:
+        send_alert_report(alert, report)
+    except Exception as exc:
+        print(f"Failed to send Slack alert report: {exc}")
 
 
 def investigate_alert(alert: dict) -> None:

@@ -29,25 +29,29 @@ def format_alert_status(payload: dict) -> str:
     return f"[RESOLVED] {alertname}"
 
 
-def _attachment_color(payload: dict) -> str:
-    common = payload.get("commonLabels") or {}
-    severity = (common.get("severity") or "").lower()
-    if not severity and payload.get("alerts"):
-        severity = (payload["alerts"][0].get("labels", {}).get("severity") or "").lower()
+def format_status_for_alert(alert: dict) -> str:
+    labels = alert.get("labels", {})
+    alertname = labels.get("alertname", "unknown")
+    if alert.get("status") == "resolved":
+        return f"[RESOLVED] {alertname}"
+    return f"[FIRING:1] {alertname}"
+
+
+def _severity_color(labels: dict) -> str:
+    severity = (labels.get("severity") or "").lower()
     return _SEVERITY_COLORS.get(severity, _DEFAULT_COLOR)
 
 
-def send_alert_status(payload: dict) -> None:
+def _post_slack(text: str, labels: dict) -> None:
     if not SLACK_WEBHOOK_URL:
         raise ValueError("SLACK_WEBHOOK_URL is not set")
 
-    text = format_alert_status(payload)
     response = requests.post(
         SLACK_WEBHOOK_URL,
         json={
             "attachments": [
                 {
-                    "color": _attachment_color(payload),
+                    "color": _severity_color(labels),
                     "text": text,
                     "mrkdwn_in": ["text"],
                 }
@@ -56,3 +60,15 @@ def send_alert_status(payload: dict) -> None:
         timeout=30,
     )
     response.raise_for_status()
+
+
+def send_alert_status(payload: dict) -> None:
+    labels = payload.get("commonLabels") or {}
+    if not labels and payload.get("alerts"):
+        labels = payload["alerts"][0].get("labels", {})
+    _post_slack(format_alert_status(payload), labels)
+
+
+def send_alert_report(alert: dict, report: str) -> None:
+    labels = alert.get("labels", {})
+    _post_slack(report.strip(), labels)

@@ -41,7 +41,7 @@ def _resource_line(ctx: AlertContext) -> str:
 
 def format_report_header(ctx: AlertContext, labels: dict) -> str:
     severity = labels.get("severity", "unknown")
-    lines = [f"Alertname — {ctx.alertname} | severity: {severity}"]
+    lines = [f"RCA — {ctx.alertname} | severity: {severity}"]
 
     region_line = _region_line(ctx, labels)
     if region_line:
