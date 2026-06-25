@@ -278,22 +278,30 @@ def _pod_labels_filter(namespace: str, pod: str, container: str) -> str:
 
 def _fetch_pod_cpu_snapshot(namespace: str, pod: str, container: str) -> dict:
     labels = _pod_labels_filter(namespace, pod, container)
-    usage = _first_scalar(
-        _query(f"sum(rate(container_cpu_usage_seconds_total{{{labels}}}[5m]))")
-    )
     limit = _first_scalar(
         _query(
             f"sum(cluster:namespace:pod_cpu:active:kube_pod_container_resource_limits{{{labels}}})"
         )
     )
-    pct = round(100 * usage / limit, 1) if usage is not None and limit else None
+    pct_by_window = {}
+    for window in ("1m", "5m", "15m"):
+        usage = _first_scalar(
+            _query(f"sum(rate(container_cpu_usage_seconds_total{{{labels}}}[{window}]))")
+        )
+        pct_by_window[window] = (
+            round(100 * usage / limit, 1) if usage is not None and limit else None
+        )
+    usage_5m = _first_scalar(
+        _query(f"sum(rate(container_cpu_usage_seconds_total{{{labels}}}[5m]))")
+    )
     restarts = _first_scalar(
         _query(f"sum(kube_pod_container_status_restarts_total{{{labels}}})")
     )
     return {
-        "usage_cores": usage,
+        "usage_cores": usage_5m,
         "limit_cores": limit,
-        "usage_percent": pct,
+        "usage_percent_by_window": pct_by_window,
+        "usage_percent": pct_by_window.get("5m"),
         "restarts": restarts,
         "resource": "cpu",
     }
@@ -301,23 +309,33 @@ def _fetch_pod_cpu_snapshot(namespace: str, pod: str, container: str) -> dict:
 
 def _fetch_pod_memory_snapshot(namespace: str, pod: str, container: str) -> dict:
     labels = _pod_labels_filter(namespace, pod, container)
-    working_set = _first_scalar(
-        _query(f"sum(container_memory_working_set_bytes{{{labels}}})")
-    )
     limit = _first_scalar(
         _query(
             "sum(cluster:namespace:pod_memory:active:kube_pod_container_resource_limits"
             f"{{{labels}}})"
         )
     )
-    pct = round(100 * working_set / limit, 1) if working_set is not None and limit else None
+    pct_by_window = {}
+    for window in ("1m", "5m", "15m"):
+        working_set = _first_scalar(
+            _query(
+                f"sum(avg_over_time(container_memory_working_set_bytes{{{labels}}}[{window}]))"
+            )
+        )
+        pct_by_window[window] = (
+            round(100 * working_set / limit, 1) if working_set is not None and limit else None
+        )
+    working_set = _first_scalar(
+        _query(f"sum(container_memory_working_set_bytes{{{labels}}})")
+    )
     restarts = _first_scalar(
         _query(f"sum(kube_pod_container_status_restarts_total{{{labels}}})")
     )
     return {
         "usage_bytes": working_set,
         "limit_bytes": limit,
-        "usage_percent": pct,
+        "usage_percent_by_window": pct_by_window,
+        "usage_percent": pct_by_window.get("5m"),
         "restarts": restarts,
         "resource": "memory",
     }

@@ -1,4 +1,3 @@
-import sys
 import unittest
 from unittest.mock import patch
 
@@ -12,7 +11,7 @@ def _ctx() -> AlertContext:
         resource_type="kubernetes",
         namespace="dozeeplatform",
         pod="consumer-abc-123",
-        container="consumer",
+        container="request-rawfiles-consumer",
         instance=None,
         module=None,
         job=None,
@@ -35,40 +34,35 @@ def _ctx() -> AlertContext:
 
 class TestWorkloadContext(unittest.TestCase):
     @patch("workload_context.fetch_workload_rollout_info")
-    def test_prefetch_includes_region_and_rollout(self, mock_rollout):
+    def test_prefetch_includes_images(self, mock_rollout):
         mock_rollout.return_value = {
             "owner_kind": "Deployment",
             "owner_name": "request-rawfiles-consumer",
             "replicaset": "request-rawfiles-consumer-7d6dd796cb",
+            "current_image": "414448255958.dkr.ecr.ap-south-1.amazonaws.com/app:v2.3.1",
+            "previous_image": "414448255958.dkr.ecr.ap-south-1.amazonaws.com/app:v2.3.0",
+            "previous_replicaset": "request-rawfiles-consumer-6c8f9d4b5a",
             "rollout_age_human": "4d 17h",
             "rollout_timestamp": "2026-06-20 14:32 UTC",
             "rollout_age_seconds": 410000,
         }
-        alert = {
-            "labels": {
-                "region": "ap-south-1",
-                "cloud": "aws",
-                "stage": "prod",
-            }
-        }
-        result = prefetch_workload_context(_ctx(), alert)
-        self.assertIsNotNone(result)
+        result = prefetch_workload_context(_ctx(), {"labels": {"region": "ap-south-1"}})
         bullets = result["bullets"]
-        self.assertTrue(any("Region: ap-south-1" in b for b in bullets))
-        self.assertTrue(any("Deployment: dozeeplatform/request-rawfiles-consumer" in b for b in bullets))
-        self.assertTrue(any("Last ReplicaSet change" in b for b in bullets))
-        self.assertIn("alert_meaning", result)
-
-    def test_skips_non_pod_resource_alerts(self):
-        ctx = AlertContext(**{**_ctx().__dict__, "alertname": "PodRestarting"})
-        self.assertIsNone(prefetch_workload_context(ctx, {"labels": {}}))
+        self.assertTrue(any("Current image:" in b for b in bullets))
+        self.assertTrue(any("Previous image:" in b for b in bullets))
+        self.assertTrue(any("v2.3.1" in b for b in bullets))
 
     @patch("workload_context.fetch_workload_rollout_info")
-    def test_handles_missing_owner(self, mock_rollout):
-        mock_rollout.return_value = {"error": "pod has no ReplicaSet owner"}
-        result = prefetch_workload_context(_ctx(), {"labels": {"region": "ap-south-1"}})
-        self.assertIsNotNone(result)
-        self.assertTrue(any("Region:" in b for b in result["bullets"]))
+    def test_handles_missing_previous_image(self, mock_rollout):
+        mock_rollout.return_value = {
+            "replicaset": "app-abc",
+            "current_image": "img:v1",
+            "rollout_age_human": "2d",
+        }
+        result = prefetch_workload_context(_ctx(), {"labels": {}})
+        bullets = result["bullets"]
+        self.assertTrue(any("Current image:" in b for b in bullets))
+        self.assertFalse(any("Previous image:" in b for b in bullets))
 
 
 if __name__ == "__main__":

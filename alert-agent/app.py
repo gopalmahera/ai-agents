@@ -5,6 +5,7 @@ from flask import Flask, jsonify, request
 
 from agent import investigate_alert
 from config import DEDUP_TTL_SECONDS, _allowed_alertname_pattern
+from slack_client import send_alert_status
 
 
 app = Flask(__name__)
@@ -52,7 +53,18 @@ def webhook():
     if payload is None:
         return jsonify({"status": "error", "message": "Invalid or missing JSON body"}), 400
 
+    group_status = payload.get("status", "unknown")
     alerts = payload.get("alerts", [])
+
+    try:
+        send_alert_status(payload)
+    except Exception as exc:
+        print(f"Failed to send Slack status notification: {exc}")
+
+    if group_status == "resolved":
+        print(f"Resolved webhook processed for {len(alerts)} alert(s)")
+        return jsonify({"status": "ok", "alerts_received": len(alerts), "accepted": 0})
+
     accepted = 0
     for alert in alerts:
         labels = alert.get("labels", {})

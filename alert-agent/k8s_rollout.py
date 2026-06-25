@@ -66,7 +66,37 @@ def _deployment_rollout_time(deployment) -> datetime | None:
     return latest
 
 
-def fetch_workload_rollout_info(namespace: str, pod_name: str) -> dict:
+def _container_image(replica_set, container_name: str | None) -> str | None:
+    containers = replica_set.spec.template.spec.containers or []
+    if container_name:
+        for container in containers:
+            if container.name == container_name:
+                return container.image
+    if containers:
+        return containers[0].image
+    return None
+
+
+def _replica_sets_for_deployment(apps_v1, namespace: str, deployment_name: str) -> list:
+    rs_list = apps_v1.list_namespaced_replica_set(namespace=namespace)
+    owned = []
+    for replica_set in rs_list.items:
+        owner_refs = replica_set.metadata.owner_references or []
+        if any(ref.kind == "Deployment" and ref.name == deployment_name for ref in owner_refs):
+            owned.append(replica_set)
+    owned.sort(
+        key=lambda rs: rs.metadata.creation_timestamp
+        or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    return owned
+
+
+def fetch_workload_rollout_info(
+    namespace: str,
+    pod_name: str,
+    container: str | None = None,
+) -> dict:
     """Return ReplicaSet / Deployment rollout metadata for a pod."""
     try:
         core_v1, apps_v1 = _ensure_k8s_clients()
@@ -88,8 +118,14 @@ def fetch_workload_rollout_info(namespace: str, pod_name: str) -> dict:
     deployment_name = None
     deployment_rollout = None
     owner_kind = "ReplicaSet"
+    current_image = _container_image(rs, container)
+    previous_image = None
+    previous_replicaset = None
 
-    dep_ref = next((ref for ref in (rs.metadata.owner_references or []) if ref.kind == "Deployment"), None)
+    dep_ref = next(
+        (ref for ref in (rs.metadata.owner_references or []) if ref.kind == "Deployment"),
+        None,
+    )
     if dep_ref:
         owner_kind = "Deployment"
         deployment_name = dep_ref.name
@@ -99,6 +135,12 @@ def fetch_workload_rollout_info(namespace: str, pod_name: str) -> dict:
         except Exception:
             deployment_rollout = None
 
+        replica_sets = _replica_sets_for_deployment(apps_v1, namespace, deployment_name)
+        if len(replica_sets) > 1:
+            previous_rs = replica_sets[1]
+            previous_replicaset = previous_rs.metadata.name
+            previous_image = _container_image(previous_rs, container)
+
     rollout_ts = deployment_rollout or rs_created
     age_human = _format_age(rollout_ts)
     age_seconds = None
@@ -106,6 +148,10 @@ def fetch_workload_rollout_info(namespace: str, pod_name: str) -> dict:
         if rollout_ts.tzinfo is None:
             rollout_ts = rollout_ts.replace(tzinfo=timezone.utc)
         age_seconds = int((datetime.now(timezone.utc) - rollout_ts).total_seconds())
+
+    image_changed = bool(
+        current_image and previous_image and current_image != previous_image
+    )
 
     return {
         "owner_kind": owner_kind,
@@ -117,4 +163,8 @@ def fetch_workload_rollout_info(namespace: str, pod_name: str) -> dict:
         "rollout_age_human": age_human,
         "rollout_timestamp": _iso_timestamp(rollout_ts),
         "rollout_age_seconds": age_seconds,
+        "current_image": current_image,
+        "previous_image": previous_image,
+        "previous_replicaset": previous_replicaset,
+        "image_changed": image_changed,
     }

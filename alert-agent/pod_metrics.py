@@ -8,6 +8,7 @@ _POD_MEMORY_ALERT = "PODMemoryLimitsUage>=90"
 
 _CPU_THRESHOLD = ">= 90%"
 _MEMORY_THRESHOLD = ">= 90%"
+_WINDOWS = ("1m", "5m", "15m")
 
 
 def _pod_labels_filter(namespace: str, pod: str, container: str) -> str:
@@ -64,26 +65,62 @@ def _format_bytes(num_bytes: float | None) -> str | None:
     return f"{mib:.0f} MiB"
 
 
+def _format_pct_windows(pct_by_window: dict[str, float | None]) -> str | None:
+    parts = []
+    for window in _WINDOWS:
+        pct = pct_by_window.get(window)
+        if pct is not None:
+            parts.append(f"{pct}% ({window} avg)")
+    if not parts:
+        return None
+    return " | ".join(parts)
+
+
+def _cpu_pct_of_limit(labels: str, window: str, limit: float | None) -> float | None:
+    if not limit:
+        return None
+    usage = _first_scalar(
+        _query_promql(f"sum(rate(container_cpu_usage_seconds_total{{{labels}}}[{window}]))")
+    )
+    if usage is None:
+        return None
+    return round(100 * usage / limit, 1)
+
+
+def _memory_pct_of_limit(labels: str, window: str, limit: float | None) -> float | None:
+    if not limit:
+        return None
+    working_set = _first_scalar(
+        _query_promql(
+            f"sum(avg_over_time(container_memory_working_set_bytes{{{labels}}}[{window}]))"
+        )
+    )
+    if working_set is None:
+        return None
+    return round(100 * working_set / limit, 1)
+
+
 def _fetch_pod_cpu_snapshot(namespace: str, pod: str, container: str) -> dict:
     labels = _pod_labels_filter(namespace, pod, container)
-    usage = _first_scalar(
-        _query_promql(f"sum(rate(container_cpu_usage_seconds_total{{{labels}}}[5m]))")
-    )
     limit = _first_scalar(
         _query_promql(
             f"sum(cluster:namespace:pod_cpu:active:kube_pod_container_resource_limits{{{labels}}})"
         )
     )
-    pct = None
-    if usage is not None and limit:
-        pct = round(100 * usage / limit, 1)
+    pct_by_window = {
+        window: _cpu_pct_of_limit(labels, window, limit) for window in _WINDOWS
+    }
+    usage_5m = _first_scalar(
+        _query_promql(f"sum(rate(container_cpu_usage_seconds_total{{{labels}}}[5m]))")
+    )
     restarts = _first_scalar(
         _query_promql(f"sum(kube_pod_container_status_restarts_total{{{labels}}})")
     )
     return {
-        "usage_cores": usage,
+        "usage_cores": usage_5m,
         "limit_cores": limit,
-        "usage_percent": pct,
+        "usage_percent_by_window": pct_by_window,
+        "usage_percent": pct_by_window.get("5m"),
         "restarts": restarts,
         "resource": "cpu",
     }
@@ -91,25 +128,26 @@ def _fetch_pod_cpu_snapshot(namespace: str, pod: str, container: str) -> dict:
 
 def _fetch_pod_memory_snapshot(namespace: str, pod: str, container: str) -> dict:
     labels = _pod_labels_filter(namespace, pod, container)
-    working_set = _first_scalar(
-        _query_promql(f"sum(container_memory_working_set_bytes{{{labels}}})")
-    )
     limit = _first_scalar(
         _query_promql(
             "sum(cluster:namespace:pod_memory:active:kube_pod_container_resource_limits"
             f"{{{labels}}})"
         )
     )
-    pct = None
-    if working_set is not None and limit:
-        pct = round(100 * working_set / limit, 1)
+    pct_by_window = {
+        window: _memory_pct_of_limit(labels, window, limit) for window in _WINDOWS
+    }
+    working_set = _first_scalar(
+        _query_promql(f"sum(container_memory_working_set_bytes{{{labels}}})")
+    )
     restarts = _first_scalar(
         _query_promql(f"sum(kube_pod_container_status_restarts_total{{{labels}}})")
     )
     return {
         "usage_bytes": working_set,
         "limit_bytes": limit,
-        "usage_percent": pct,
+        "usage_percent_by_window": pct_by_window,
+        "usage_percent": pct_by_window.get("5m"),
         "restarts": restarts,
         "resource": "memory",
     }
@@ -117,16 +155,12 @@ def _fetch_pod_memory_snapshot(namespace: str, pod: str, container: str) -> dict
 
 def _build_cpu_bullets(ctx: AlertContext, snapshot: dict) -> list[str]:
     bullets: list[str] = []
-    pct = snapshot.get("usage_percent")
-    if pct is not None:
-        bullets.append(f"CPU usage % of limit: {pct}% (threshold {_CPU_THRESHOLD})")
-    usage = snapshot.get("usage_cores")
-    if usage is not None:
-        bullets.append(f"CPU usage rate: {usage:.3f} cores (5m avg)")
+    pct_line = _format_pct_windows(snapshot.get("usage_percent_by_window") or {})
+    if pct_line:
+        bullets.append(f"CPU usage % of limit: {pct_line} — threshold {_CPU_THRESHOLD}")
     limit = snapshot.get("limit_cores")
     if limit is not None:
-        formatted = _format_cores(limit)
-        bullets.append(f"CPU limit: {formatted}")
+        bullets.append(f"CPU limit: {_format_cores(limit)}")
     restarts = snapshot.get("restarts")
     if restarts is not None:
         bullets.append(f"Container restarts: {int(restarts)}")
@@ -135,9 +169,9 @@ def _build_cpu_bullets(ctx: AlertContext, snapshot: dict) -> list[str]:
 
 def _build_memory_bullets(ctx: AlertContext, snapshot: dict) -> list[str]:
     bullets: list[str] = []
-    pct = snapshot.get("usage_percent")
-    if pct is not None:
-        bullets.append(f"Memory usage % of limit: {pct}% (threshold {_MEMORY_THRESHOLD})")
+    pct_line = _format_pct_windows(snapshot.get("usage_percent_by_window") or {})
+    if pct_line:
+        bullets.append(f"Memory usage % of limit: {pct_line} — threshold {_MEMORY_THRESHOLD}")
     usage = snapshot.get("usage_bytes")
     limit = snapshot.get("limit_bytes")
     if usage is not None:
@@ -166,7 +200,7 @@ def build_findings_bullets(ctx: AlertContext, prefetched: dict | None) -> list[s
         pct = snapshot.get("usage_percent")
         if pct is not None:
             findings.append(
-                f"Container {ctx.container or 'main'} is at {pct}% of its CPU limit — "
+                f"Container {ctx.container or 'main'} is at {pct}% of its CPU limit (5m avg) — "
                 "alert condition confirmed."
             )
         elif prefetched.get("alert_valid"):
@@ -178,7 +212,7 @@ def build_findings_bullets(ctx: AlertContext, prefetched: dict | None) -> list[s
         pct = snapshot.get("usage_percent")
         if pct is not None:
             findings.append(
-                f"Container {ctx.container or 'main'} is at {pct}% of its memory limit — "
+                f"Container {ctx.container or 'main'} is at {pct}% of its memory limit (5m avg) — "
                 "alert condition confirmed."
             )
         elif prefetched.get("alert_valid"):
@@ -190,15 +224,17 @@ def build_findings_bullets(ctx: AlertContext, prefetched: dict | None) -> list[s
     rollout = (prefetched.get("workload") or {}).get("rollout") or {}
     age_seconds = rollout.get("rollout_age_seconds")
     age = rollout.get("rollout_age_human")
-    if age_seconds is not None:
-        if age_seconds < 3600:
+    if age_seconds is not None and age_seconds < 3600:
+        if rollout.get("image_changed"):
+            findings.append(
+                f"ReplicaSet changed {age} ago with a new image — correlate alert timing with deploy."
+            )
+        else:
             findings.append(
                 f"ReplicaSet changed {age} ago — correlate alert timing with recent deploy."
             )
-        elif age:
-            findings.append(f"Workload stable since last ReplicaSet change ({age} ago).")
     elif age:
-        findings.append(f"Last ReplicaSet change: {age} ago.")
+        findings.append(f"Workload stable since last ReplicaSet change ({age} ago).")
 
     restarts = snapshot.get("restarts")
     if restarts is not None and restarts == 0:

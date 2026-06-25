@@ -32,13 +32,19 @@ def prefetch_workload_context(ctx: AlertContext, alert: dict) -> dict | None:
         return None
 
     labels = alert.get("labels", {})
-    rollout = fetch_workload_rollout_info(ctx.namespace, ctx.pod)
+    rollout = fetch_workload_rollout_info(ctx.namespace, ctx.pod, container=ctx.container)
     bullets = _region_bullets(ctx, labels)
 
     if rollout.get("owner_kind") == "Deployment" and rollout.get("owner_name"):
         bullets.append(f"Deployment: {ctx.namespace}/{rollout['owner_name']}")
     if rollout.get("replicaset"):
         bullets.append(f"ReplicaSet: {rollout['replicaset']}")
+    if rollout.get("current_image"):
+        bullets.append(f"Current image: {rollout['current_image']}")
+    if rollout.get("previous_image"):
+        prev_rs = rollout.get("previous_replicaset")
+        suffix = f" (RS {prev_rs})" if prev_rs else ""
+        bullets.append(f"Previous image: {rollout['previous_image']}{suffix}")
     if rollout.get("rollout_age_human"):
         ts = rollout.get("rollout_timestamp") or rollout.get("replicaset_created_at") or ""
         suffix = f" ({ts})" if ts else ""

@@ -8,7 +8,7 @@ from prefetch import build_prefetch
 from log_writer import save_rca
 from mcp_client import run_investigation
 from rca_formatter import format_rca
-from slack_client import send_slack
+from report_header import format_report_header
 
 
 def _is_quota_error(exc: BaseException) -> bool:
@@ -32,6 +32,18 @@ def _run_rca(alert: dict, ctx, prefetched) -> str:
         raise
 
 
+def _save_report(alert: dict, ctx, body: str) -> None:
+    labels = alert.get("labels", {})
+    header = format_report_header(ctx, labels)
+    report = f"{header}\n\n{body.strip()}"
+    print("=" * 80)
+    print(f"Alert report for {ctx.alertname}")
+    print("=" * 80)
+    print(report)
+    log_file = save_rca(alert, report)
+    print(f"Alert report saved to {log_file}")
+
+
 def investigate_alert(alert: dict) -> None:
     status = alert.get("status")
     labels = alert.get("labels", {})
@@ -47,20 +59,15 @@ def investigate_alert(alert: dict) -> None:
     try:
         rca = _run_rca(alert, ctx, prefetched)
         rca = format_rca(rca, ctx, prefetched=prefetched)
-        print("=" * 80)
-        print(f"RCA for {alertname}")
-        print("=" * 80)
-        print(rca)
-        log_file = save_rca(alert, rca)
-        print(f"RCA saved to {log_file}")
-        send_slack(rca, alert=alert)
+        _save_report(alert, ctx, rca)
     except Exception as exc:
         if _is_quota_error(exc) and prefetched:
             try:
-                rca = format_rca(build_deterministic_rca(ctx, prefetched), ctx, prefetched=prefetched)
-                log_file = save_rca(alert, rca)
-                print(f"RCA saved to {log_file} (deterministic fallback)")
-                send_slack(rca, alert=alert)
+                rca = format_rca(
+                    build_deterministic_rca(ctx, prefetched), ctx, prefetched=prefetched
+                )
+                _save_report(alert, ctx, rca)
+                print("(deterministic fallback)")
                 return
             except Exception:
                 pass
@@ -76,7 +83,3 @@ def investigate_alert(alert: dict) -> None:
                 f"Traceback:\n{traceback.format_exc()}"
             )
         print(error_message)
-        try:
-            send_slack(error_message, alert=alert)
-        except Exception:
-            print("Failed to send Slack error notification.")
