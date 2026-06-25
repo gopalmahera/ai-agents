@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1
 
+# Build for EKS (linux/amd64). On Apple Silicon: docker build --platform linux/amd64 ...
 ARG PYTHON_IMAGE=python:3.12.8-slim-bookworm
 
 FROM ${PYTHON_IMAGE} AS builder

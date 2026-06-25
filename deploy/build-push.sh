@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REGISTRY="${REGISTRY:-414448255958.dkr.ecr.ap-south-1.amazonaws.com/prometheus}"
+REGISTRY="${REGISTRY:-414448255958.dkr.ecr.ap-south-1.amazonaws.com/monitoring}"
 IMAGE="${IMAGE:-ai-alert-agent}"
 AWS_REGION="${AWS_REGION:-ap-south-1}"
 PLATFORM="${PLATFORM:-linux/amd64}"
