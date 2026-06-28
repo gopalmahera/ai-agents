@@ -42,6 +42,7 @@ _EC2_DEFAULT_SCRAPE_JOB = "AWSEC2NodeExporter"
 _EC2_PRIMARY_METRIC: dict[str, str] = {
     "EC2HostMemoryUnderMemoryPressure": "major_page_faults_per_sec",
     "EC2HostOutOfMemory": "memory_available_percent",
+    "EC2HostMemoryUnderUtilized": "memory_available_percent",
     "EC2HostHighCpuLoad": "cpu_percent",
     "EC2HostCpuStealNoisyNeighbor": "cpu_steal_percent",
     "EC2HostUnusualNetworkThroughputIn": "network_receive_mbps",
@@ -50,6 +51,22 @@ _EC2_PRIMARY_METRIC: dict[str, str] = {
     "EC2HostUnusualDiskWriteRate": "disk_write_mbps",
     "EC2HostOutOfDiskSpace": "disk_avail_percent",
     "EC2HostDiskWillFillIn24Hours": "disk_avail_percent",
+    "EC2HostSwapIsFillingUp": "swap_used_percent",
+    "EC2HostOutOfInodes": "inode_free_percent",
+    "EC2HostInodesWillFillIn24Hours": "inode_free_percent",
+    "EC2HostUnusualDiskReadLatency": "disk_read_latency_ms",
+    "EC2HostUnusualDiskWriteLatency": "disk_write_latency_ms",
+    "EC2HostSystemdServiceCrashed": "systemd_failed_units",
+    "EC2HostNetworkInterfaceSaturated": "network_interface_saturation_percent",
+    "EC2HostConntrackLimit": "conntrack_fill_percent",
+    "EC2HostClockSkew": "clock_offset_seconds",
+    "EC2HostClockNotSynchronising": "ntp_sync_status",
+    "EC2HostPhysicalComponentTooHot": "hwmon_temp_celsius",
+    "EC2HostNodeOvertemperatureAlarm": "hwmon_temp_celsius",
+    "EC2HostRaidArrayGotInactive": "raid_inactive",
+    "EC2HostRaidDiskFailure": "raid_failed_disks",
+    "EC2HostEdacCorrectableErrorsDetected": "edac_correctable_errors",
+    "EC2HostEdacUncorrectableErrorsDetected": "edac_uncorrectable_errors",
 }
 
 
@@ -120,6 +137,11 @@ class AlertContext:
                 lines.append(f"target: {self.target}")
             if self.module:
                 lines.append(f"module: {self.module}")
+            if self.job and self.job != "blackbox-exporter":
+                lines.append(f"job: {self.job}")
+                lines.append(
+                    f"note: pass job=\"{self.job}\" to prom_get_probe_* tools instead of the default blackbox-exporter"
+                )
         elif self.resource_type == "kafka":
             if self.topic:
                 lines.append(f"topic: {self.topic}")
@@ -134,6 +156,15 @@ class AlertContext:
                 lines.append(
                     "note: alertname pod.restart.* with namespace msk is MSK consumer lag, not a pod restart"
                 )
+        elif self.resource_type == "loki":
+            if self.namespace:
+                lines.append(f"namespace: {self.namespace}")
+            if self.job:
+                lines.append(f"job: {self.job}")
+            lines.append(
+                "note: this alert originates from a Loki recording rule; "
+                "use loki_search_logs or loki_search_errors to fetch recent log lines for root cause analysis"
+            )
         return "\n".join(lines)
 
 
@@ -183,10 +214,23 @@ def _parse_kafka_from_annotations(
 def _is_kafka_alert(alertname: str, labels: dict) -> bool:
     if alertname.startswith("msk."):
         return True
+    if alertname.startswith("NetworkKafka"):
+        return True
     job = labels.get("job", "")
     if job.startswith("msk-") and labels.get("topic"):
         return True
     if alertname.startswith("pod.restart.") and labels.get("namespace", "").lower() == "msk":
+        return True
+    return False
+
+
+def _is_loki_alert(alertname: str, labels: dict) -> bool:
+    """Alerts originating from Loki recording rules carry a loki_rule or datasource=loki label."""
+    if labels.get("datasource", "").lower() == "loki":
+        return True
+    if labels.get("loki_rule"):
+        return True
+    if alertname.startswith("Loki") or alertname.startswith("loki."):
         return True
     return False
 
@@ -198,6 +242,8 @@ def _resource_type(alertname: str, labels: dict) -> str:
         return "host"
     if alertname.startswith("Blackbox") or alertname == "TLSCertificateExpiringSoon":
         return "probe"
+    if _is_loki_alert(alertname, labels):
+        return "loki"
     return "kubernetes"
 
 
@@ -290,6 +336,8 @@ def build_alert_context(alert: dict) -> AlertContext:
     if resource_type in ("host", "probe", "kafka"):
         namespace = None
         pod = None
+    elif resource_type == "loki":
+        pod = None
 
     host_ip = _host_ip(instance) if resource_type == "host" else None
     scrape_instance = instance if resource_type == "host" else None
@@ -333,7 +381,8 @@ def build_alert_context(alert: dict) -> AlertContext:
 def alert_for_prompt(alert: dict, ctx: AlertContext) -> dict:
     """Return a copy of the alert with misleading k8s labels removed for non-k8s types."""
     sanitized = copy.deepcopy(alert)
-    if ctx.resource_type == "kubernetes":
+    if ctx.resource_type in ("kubernetes", "loki"):
+        # Keep namespace for loki so the LLM can build targeted log queries.
         return sanitized
     labels = sanitized.setdefault("labels", {})
     for key in ("namespace", "pod", "container"):

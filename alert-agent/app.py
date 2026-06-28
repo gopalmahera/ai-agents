@@ -1,10 +1,13 @@
 import threading
 import time
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from agent import investigate_alert
 from config import DEDUP_TTL_SECONDS, _allowed_alertname_pattern
+from log_writer import log_incoming_payload
+from metrics import alerts_accepted, alerts_deduplicated, alerts_received, alerts_skipped
 from slack_client import send_alert_status
 
 
@@ -43,6 +46,11 @@ def health():
     return jsonify({"status": "ok"})
 
 
+@app.get("/metrics")
+def metrics():
+    return Response(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
+
+
 def _investigate_in_background(alert: dict) -> None:
     investigate_alert(alert)
 
@@ -52,6 +60,11 @@ def webhook():
     payload = request.get_json(silent=True)
     if payload is None:
         return jsonify({"status": "error", "message": "Invalid or missing JSON body"}), 400
+
+    try:
+        log_incoming_payload(payload)
+    except Exception as exc:
+        print(f"Failed to log incoming payload: {exc}")
 
     group_status = payload.get("status", "unknown")
     alerts = payload.get("alerts", [])
@@ -74,19 +87,23 @@ def webhook():
         print(
             f"Received alert alertname={alertname} status={status} fingerprint={fingerprint}"
         )
+        alerts_received.labels(alertname=alertname).inc()
 
         if status != "firing":
             print(f"Skipping alert alertname={alertname} because status={status}")
+            alerts_skipped.inc()
             continue
 
         if not _is_allowed_alertname(alertname):
             print(f"Skipping alert alertname={alertname} — not in ALLOWED_ALERTNAMES")
+            alerts_skipped.inc()
             continue
 
         if _is_duplicate(fingerprint):
             print(
                 f"Skipping duplicate alert alertname={alertname} fingerprint={fingerprint}"
             )
+            alerts_deduplicated.inc()
             continue
 
         thread = threading.Thread(
@@ -95,6 +112,7 @@ def webhook():
             daemon=True,
         )
         thread.start()
+        alerts_accepted.inc()
         accepted += 1
 
     return jsonify({"status": "ok", "alerts_received": len(alerts), "accepted": accepted})

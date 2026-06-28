@@ -5,6 +5,19 @@ from unittest.mock import MagicMock, patch
 
 sys.modules.setdefault("requests", MagicMock())
 
+# Stub prometheus_client so app.py imports work without the package.
+_prom_stub = types.ModuleType("prometheus_client")
+_prom_stub.Counter = MagicMock(return_value=MagicMock())
+_prom_stub.generate_latest = MagicMock(return_value=b"")
+_prom_stub.CONTENT_TYPE_LATEST = "text/plain"
+sys.modules.setdefault("prometheus_client", _prom_stub)
+
+# Stub metrics module (depends on prometheus_client).
+_metrics_stub = types.ModuleType("metrics")
+for _name in ("alerts_received", "alerts_deduplicated", "alerts_skipped", "alerts_accepted"):
+    setattr(_metrics_stub, _name, MagicMock())
+sys.modules.setdefault("metrics", _metrics_stub)
+
 agent_stub = types.ModuleType("agent")
 agent_stub.investigate_alert = MagicMock()
 sys.modules["agent"] = agent_stub
@@ -70,6 +83,7 @@ def _install_flask_stub() -> None:
     flask_mod.Flask = Flask
     flask_mod.jsonify = jsonify
     flask_mod.request = MagicMock()
+    flask_mod.Response = MagicMock
     sys.modules["flask"] = flask_mod
 
 

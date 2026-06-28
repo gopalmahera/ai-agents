@@ -59,8 +59,8 @@ exec gunicorn \
   --bind 0.0.0.0:5001 \
   --workers 1 \
   --threads 8 \
-  --timeout 300 \
-  --graceful-timeout 30 \
+  --timeout "${GUNICORN_TIMEOUT:-300}" \
+  --graceful-timeout "${GUNICORN_GRACEFUL_TIMEOUT:-30}" \
   --access-logfile - \
   --error-logfile - \
   app:app

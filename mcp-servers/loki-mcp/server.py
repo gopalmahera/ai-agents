@@ -13,6 +13,7 @@ mcp = FastMCP(
 )
 
 LOKI_URL = os.getenv("LOKI_URL", "http://host.docker.internal:3100")
+_TIMEOUT = int(os.getenv("MCP_SOCKET_TIMEOUT", "30"))
 
 
 def _default_time_range():
@@ -35,7 +36,7 @@ def _query_range(query: str, start: str | None = None, end: str | None = None, l
             "end": end,
             "limit": limit,
         },
-        timeout=30,
+        timeout=_TIMEOUT,
     )
     response.raise_for_status()
     return response.json()

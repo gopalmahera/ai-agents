@@ -119,11 +119,68 @@ def _default_kafka_actions(ctx: AlertContext) -> list[str]:
     ]
 
 
+def _build_probe_rca(ctx: AlertContext, prefetched: dict | None) -> str:
+    target = ctx.target or ctx.instance or "unknown"
+    lines = [
+        f"*Alert summary:*\n{ctx.alertname}: Probe or TLS check failed for {target}.",
+        "",
+        "*Subject:*",
+        f"Target: {target}",
+    ]
+    if ctx.module:
+        lines.append(f"Module: {ctx.module}")
+
+    meaning = get_alert_meaning(ctx.alertname)
+    if meaning:
+        lines.extend(["", "*What this alert means:*", meaning])
+
+    lines.extend(["", "*Metrics:*", "• No metrics prefetched; LLM investigation required."])
+    lines.extend(["", "*Findings:*", "• Probe failure detected by blackbox exporter."])
+    lines.extend(["", "*Probable root cause:*",
+                  f"The probe to {target} failed. The endpoint may be unreachable, returning an unexpected HTTP status, or the TLS certificate may be expired or expiring soon."])
+    lines.extend(["", "*Recommended actions:*",
+                  f"1. Verify {target} is reachable and returning the expected HTTP status.",
+                  "2. Check TLS certificate validity and expiry date.",
+                  "3. Review DNS resolution and network connectivity from the probe host."])
+    return "\n".join(lines)
+
+
+def _build_loki_rca(ctx: AlertContext, prefetched: dict | None) -> str:
+    namespace = ctx.namespace or "unknown"
+    lines = [
+        f"*Alert summary:*\n{ctx.alertname}: Loki-sourced alert fired for {namespace}.",
+        "",
+        "*Subject:*",
+        f"Namespace: {namespace}",
+    ]
+    if ctx.job:
+        lines.append(f"Job: {ctx.job}")
+
+    meaning = get_alert_meaning(ctx.alertname)
+    if meaning:
+        lines.extend(["", "*What this alert means:*", meaning])
+
+    lines.extend(["", "*Metrics:*", "• No metrics prefetched; LLM investigation required."])
+    lines.extend(["", "*Findings:*", "• Alert originated from a Loki recording rule; log investigation needed."])
+    lines.extend(["", "*Probable root cause:*",
+                  f"A Loki recording rule detected a pattern in logs for namespace {namespace}. "
+                  "Review recent error logs to identify the root cause."])
+    lines.extend(["", "*Recommended actions:*",
+                  f"1. Query Loki for recent error logs in namespace {namespace}.",
+                  "2. Correlate log timestamps with any recent deployments or config changes.",
+                  "3. Enable LLM investigation for automated root cause analysis."])
+    return "\n".join(lines)
+
+
 def build_deterministic_rca(ctx: AlertContext, prefetched: dict | None) -> str:
     if ctx.alertname in _POD_RESOURCE_ALERTS:
         return _build_pod_rca(ctx, prefetched)
     if ctx.resource_type == "kafka":
         return _build_kafka_rca(ctx, prefetched)
+    if ctx.resource_type == "probe":
+        return _build_probe_rca(ctx, prefetched)
+    if ctx.resource_type == "loki":
+        return _build_loki_rca(ctx, prefetched)
     return _build_host_rca(ctx, prefetched)
 
 

@@ -92,7 +92,9 @@ def _normalize_bullets(text: str) -> str:
     result = []
     for line in lines:
         stripped = line.strip()
-        if stripped.startswith("*") and stripped.endswith("*:"):
+        # Section headers use Slack bold format: *Section name:*
+        # They start AND end with *, e.g. "*Metrics:*", "*Findings:*"
+        if stripped.startswith("*") and stripped.endswith(":*"):
             in_bullet_section = stripped.lower() in (
                 "*metrics:*",
                 "*workload:*",

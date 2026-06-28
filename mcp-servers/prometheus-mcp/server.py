@@ -12,13 +12,14 @@ mcp = FastMCP(
 )
 
 PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://prometheus-sit.dozee.int")
+_TIMEOUT = int(os.getenv("MCP_SOCKET_TIMEOUT", "30"))
 
 
 def _query(query: str):
     response = requests.get(
         f"{PROMETHEUS_URL}/api/v1/query",
         params={"query": query},
-        timeout=30,
+        timeout=_TIMEOUT,
     )
     response.raise_for_status()
     return response.json()
@@ -131,7 +132,7 @@ def get_alerts():
     """Get active alerts."""
     response = requests.get(
         f"{PROMETHEUS_URL}/api/v1/alerts",
-        timeout=30,
+        timeout=_TIMEOUT,
     )
     response.raise_for_status()
     return response.json()
@@ -142,7 +143,7 @@ def get_targets():
     """Get scrape targets."""
     response = requests.get(
         f"{PROMETHEUS_URL}/api/v1/targets",
-        timeout=30,
+        timeout=_TIMEOUT,
     )
     response.raise_for_status()
     return response.json()
@@ -240,10 +241,11 @@ def get_probe_duration(instance: str, job: str = "blackbox-exporter"):
 
 
 @mcp.tool()
-def get_probe_http_status(instance: str):
+def get_probe_http_status(instance: str, job: str = "blackbox-exporter"):
     """Get HTTP status code from blackbox HTTP probe."""
     inst = _instance_filter(instance)
-    return _query(f'probe_http_status_code{{job="blackbox-exporter",{inst}}}')
+    escaped_job = job.replace("\\", "\\\\").replace('"', '\\"')
+    return _query(f'probe_http_status_code{{job="{escaped_job}",{inst}}}')
 
 
 @mcp.tool()
@@ -351,6 +353,57 @@ def get_pod_cpu_snapshot(namespace: str, pod: str, container: str):
 def get_pod_memory_snapshot(namespace: str, pod: str, container: str):
     """Get pod memory working set, limit, percent of limit, and restarts."""
     return _fetch_pod_memory_snapshot(namespace, pod, container)
+
+
+@mcp.tool()
+def get_node_advanced(instance: str):
+    """Get EC2 host advanced metrics: swap, inodes, disk latency, systemd, conntrack, clock, temperature, RAID."""
+    inst = _instance_filter(instance)
+    return {
+        "swap_used_percent": _first_scalar(
+            _query(
+                f"(1 - (node_memory_SwapFree_bytes{{{inst}}} / node_memory_SwapTotal_bytes{{{inst}}})) * 100"
+            )
+        ),
+        "inode_free_percent": _first_scalar(
+            _query(
+                f'node_filesystem_files_free{{{inst},mountpoint="/rootfs"}} / node_filesystem_files{{{inst},mountpoint="/rootfs"}} * 100'
+            )
+        ),
+        "disk_read_latency_ms": _first_scalar(
+            _query(
+                f"rate(node_disk_read_time_seconds_total{{{inst}}}[5m]) / rate(node_disk_reads_completed_total{{{inst}}}[5m]) * 1000"
+            )
+        ),
+        "disk_write_latency_ms": _first_scalar(
+            _query(
+                f'rate(node_disk_write_time_seconds_total{{{inst},device!~"mmcblk.+"}}[5m]) / rate(node_disk_writes_completed_total{{{inst},device!~"mmcblk.+"}}[5m]) * 1000'
+            )
+        ),
+        "systemd_failed_units": _query(
+            f'node_systemd_unit_state{{{inst},state="failed"}}'
+        ),
+        "conntrack_fill_percent": _first_scalar(
+            _query(
+                f"node_nf_conntrack_entries{{{inst}}} / node_nf_conntrack_entries_limit{{{inst}}} * 100"
+            )
+        ),
+        "clock_offset_seconds": _first_scalar(
+            _query(f"node_timex_offset_seconds{{{inst}}}")
+        ),
+        "ntp_sync_status": _first_scalar(
+            _query(f"node_timex_sync_status{{{inst}}}")
+        ),
+        "hwmon_temp_celsius": _query(f"node_hwmon_temp_celsius{{{inst}}}"),
+        "raid_inactive": _query(f'node_md_state{{{inst},state="inactive"}}'),
+        "raid_failed_disks": _query(f'node_md_disks{{{inst},state="failed"}}'),
+        "edac_correctable_errors": _first_scalar(
+            _query(f"increase(node_edac_correctable_errors_total{{{inst}}}[1h])")
+        ),
+        "edac_uncorrectable_errors": _first_scalar(
+            _query(f"node_edac_uncorrectable_errors_total{{{inst}}}")
+        ),
+    }
 
 
 if __name__ == "__main__":

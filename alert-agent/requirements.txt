@@ -3,3 +3,5 @@ openai
 pydantic-ai-slim[mcp]
 httpx
 requests
+prometheus_client
+pyyaml

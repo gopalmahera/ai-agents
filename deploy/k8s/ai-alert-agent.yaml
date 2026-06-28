@@ -1,5 +1,18 @@
 ---
 apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-alert-agent-catalog
+  namespace: monitoring
+data:
+  alert_catalog.yaml: |
+    # Override or extend built-in alert descriptions.
+    # Format: alertname: "one-line description"
+    # Example:
+    # MyCustomAlert: "Custom alert fired when X exceeds threshold Y."
+
+---
+apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: ai-alert-agent
@@ -92,6 +105,8 @@ spec:
               value: /app/logs
             - name: DEDUP_TTL_SECONDS
               value: '900'
+            - name: ALERT_CATALOG_PATH
+              value: /app/config/alert_catalog.yaml
           livenessProbe:
             httpGet:
               path: /health
@@ -114,10 +129,16 @@ spec:
           volumeMounts:
             - name: logs
               mountPath: /app/logs
+            - name: catalog
+              mountPath: /app/config
+              readOnly: true
       volumes:
         - name: logs
           persistentVolumeClaim:
             claimName: ai-alert-agent-logs
+        - name: catalog
+          configMap:
+            name: ai-alert-agent-catalog
 
 ---
 apiVersion: v1

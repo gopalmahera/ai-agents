@@ -13,6 +13,7 @@ mcp = FastMCP(
 )
 
 PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://prometheus-sit.dozee.int")
+_TIMEOUT = int(os.getenv("MCP_SOCKET_TIMEOUT", "30"))
 
 _MSK_LAG_RE = re.compile(r"^msk\.(kbc|kb)\.(.+?)\s*>\s*\d+")
 _MSK_NOMESSAGE_RE = re.compile(r"^msk\.(kbc|kb)\.nomessage\.(.+?)\s*=\s*0")
@@ -22,7 +23,7 @@ def _query(query: str):
     response = requests.get(
         f"{PROMETHEUS_URL}/api/v1/query",
         params={"query": query},
-        timeout=30,
+        timeout=_TIMEOUT,
     )
     response.raise_for_status()
     return response.json()
@@ -131,7 +132,7 @@ def list_kafka_jobs():
     """List Prometheus job label values related to MSK/Kafka scrapes."""
     payload = requests.get(
         f"{PROMETHEUS_URL}/api/v1/label/job/values",
-        timeout=30,
+        timeout=_TIMEOUT,
     )
     payload.raise_for_status()
     jobs = payload.json().get("data", [])
@@ -143,7 +144,7 @@ def list_active_msk_alerts():
     """List active Prometheus alerts with alertname starting with msk."""
     response = requests.get(
         f"{PROMETHEUS_URL}/api/v1/alerts",
-        timeout=30,
+        timeout=_TIMEOUT,
     )
     response.raise_for_status()
     payload = response.json()
@@ -164,6 +165,21 @@ def find_deployments_for_consumer_group(group_id: str):
         "group_id": group_id,
         "suggested_deployment_patterns": [p for p in patterns if p],
         "hint": "Search namespaces dozee* and computeworker* for deployments matching these patterns.",
+    }
+
+
+@mcp.tool()
+def get_broker_throughput(topic: str, job: str | None = None):
+    """Get Kafka broker-level bytes-in and bytes-out per second for a topic."""
+    top = _escape(topic)
+    job_filter = f'job="{_escape(job)}",' if job else ""
+    return {
+        "bytes_out_per_sec_kb": _query(
+            f'sum by(topic,job)(irate(kafka_server_BrokerTopicMetrics_Count{{{job_filter}name=~"BytesOutPerSec|BytesInPerSec",topic="{top}"}}[5m])) / 1024'
+        ),
+        "bytes_in_per_sec_kb": _query(
+            f'sum by(topic,job)(irate(kafka_server_BrokerTopicMetrics_Count{{{job_filter}name="BytesInPerSec",topic="{top}"}}[5m])) / 1024'
+        ),
     }
 
 

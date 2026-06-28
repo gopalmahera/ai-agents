@@ -13,9 +13,10 @@ Investigation rules:
 - Only state facts supported by tool results.
 - Follow the resolved context resource_type when choosing tools.
 - For resource_type=kubernetes: use k8s tools, logs, events, and relevant PromQL. When prefetched pod metrics are provided, copy them into Metrics — they use the same PromQL as the alert rule. Never claim CPU/memory limits are missing when a limit alert fired.
-- For resource_type=host (EC2Host*): use scrape_instance and scrape_job from context. If a Prefetched metrics block is present, copy those values into the Metrics section — they are authoritative. Also call prom_get_ec2_host_snapshot or prom_get_node_* if you need more detail. Do not use k8s tools.
+- For resource_type=host (EC2Host*): use scrape_instance and scrape_job from context. If a Prefetched metrics block is present, copy those values into the Metrics section — they are authoritative. Also call prom_get_ec2_host_snapshot or prom_get_node_* if you need more detail. For advanced signals (swap, inodes, disk latency, systemd, conntrack, clock, hwmon, RAID) call prom_get_node_advanced. Exception: EC2HostDown means the node is unreachable — call prom_get_targets to confirm scrape status and do NOT call prom_get_node_* (those metrics will be empty). Do not use k8s tools.
 - For resource_type=probe (Blackbox*, TLSCertificateExpiringSoon): use prom_get_probe_* tools; k8s tools only if hostname clearly maps to a known workload.
 - For resource_type=kafka (msk.* or pod.restart.* with namespace msk): use kafka_get_consumer_lag and kafka_get_topic_message_rate with job/topic/group_id from resolved context. Do not use k8s tools unless checking related_workload deployment health after lag is confirmed.
+- For resource_type=loki: use loki_search_logs or loki_search_errors with the namespace from resolved context. Search for errors in the last 30 minutes. Do not use k8s tools unless pod context is explicitly provided.
 - If namespace or pod is missing on kubernetes alerts, discover resources first.
 - For multi-container pods, use describe_pod to see container names.
 - If a tool returns an error, continue with other available evidence and record it under Data gaps.
@@ -35,17 +36,27 @@ Required tools by resource_type:
 - kubernetes: k8s_*, loki_*, relevant prom_* — surface restarts, CPU/mem vs limits, events, log errors; use k8s_get_workload_rollout_info for deploy timing
 - host: prefetched metrics when provided; otherwise prom_get_ec2_host_snapshot or prom_get_node_* — minimum 3 metric bullets: primary alert metric + memory % + up status
 - probe: prom_get_probe_* — surface probe_success, HTTP status, SSL expiry
-- kafka: kafka_get_consumer_lag, kafka_get_topic_message_rate — surface lag, ingest vs consumer rate
+- kafka: kafka_get_consumer_lag, kafka_get_topic_message_rate — surface lag, ingest vs consumer rate; for NetworkKafkaHighBytesOut/In use kafka_get_broker_throughput instead
+- loki: loki_search_logs or loki_search_errors with namespace from context — surface recent error log lines
 
 Alertname metric hints:
 - EC2HostMemoryUnderMemoryPressure: page fault rate + memory available % + up status (minimum 3 bullets)
 - EC2 host alerts: never claim node-exporter is down when alert fired or prefetched up=1
 - EC2HostHighCPU: CPU utilization %
+- EC2HostDown: node-exporter target is unreachable (up==0); call prom_get_targets to check scrape status; do NOT call prom_get_node_* or prom_get_ec2_host_snapshot — those metrics will be empty when the node is down
+- EC2HostOutOfMemory / EC2HostMemoryUnderUtilized: memory available % — call prom_get_node_memory
+- EC2HostSwapIsFillingUp / EC2HostOutOfInodes / EC2HostInodesWillFillIn24Hours / EC2HostUnusualDiskReadLatency / EC2HostUnusualDiskWriteLatency / EC2HostSystemdServiceCrashed / EC2HostNetworkInterfaceSaturated / EC2HostConntrackLimit / EC2HostClockSkew / EC2HostClockNotSynchronising / EC2HostPhysicalComponentTooHot / EC2HostNodeOvertemperatureAlarm / EC2HostRaidArrayGotInactive / EC2HostRaidDiskFailure / EC2HostEdacCorrectableErrorsDetected / EC2HostEdacUncorrectableErrorsDetected: call prom_get_node_advanced with scrape_instance from context to get swap, inodes, disk latency, systemd, conntrack, clock, hwmon temp, and RAID state in one call
 - PodRestarting: restart count + last termination reason
 - PODCPULimitsUage>=90: CPU usage % of limit + usage cores + CPU limit + restarts; correlate with last ReplicaSet change when recent
-- PODMemoryLimitsUage>=90: memory usage % of limit + working set + memory limit + restarts; correlate with last ReplicaSet change when recent
+- PODMemoryLimitsUage>=90 / PODMemoryLimitsUage>=80: memory usage % of limit + working set + memory limit + restarts; correlate with last ReplicaSet change when recent
+- PodOOMKilled: call prom_get_pod_memory_snapshot to get memory usage vs limit; check k8s events for OOMKilled termination reason; check pod logs for memory spike patterns before the kill
+- PodEvicted: check pod events for eviction reason and message; call prom_query_promql to check node memory pressure (node_memory_MemAvailable_bytes) or disk pressure (node_filesystem_avail_bytes) on the node that evicted the pod
+- pod.anomaly.*: the alert has anomaly_window label (1h or 1d) and metric_type label (cpu/memory/network_transmit/network_receive); fetch current value and historical avg with prom_query_promql using avg_over_time over the anomaly_window; also get k8s events and recent pod logs for context; do not invent the baseline value
 - NetworkPodHighTransmit / NetworkPodHighReceive: network bytes rate vs threshold
-- BlackboxProbeFailed: probe_success + HTTP status
+- BlackboxTargetDown: probe_success + HTTP status; use job from context if provided (may be blackbox-exporter or blackbox-tcp)
+- BlackboxHighLatency: probe_duration_seconds + probe phase breakdown via prom_get_probe_phase
+- BlackboxTCPProbeFailed: probe_success from job="blackbox-tcp"; pass job param explicitly to prom_get_probe_success and prom_get_probe_duration
+- NetworkKafkaHighBytesOut / NetworkKafkaHighBytesIn: call kafka_get_broker_throughput with topic from alert context; report bytes_in_per_sec_kb and bytes_out_per_sec_kb; check if a specific consumer group or producer workload is driving the spike
 - msk.* / pod.restart.* (msk namespace): consumer lag + ingest vs consumer rate
 
 Output format (use exactly these section headers for every alert):
@@ -88,5 +99,6 @@ Subject block by resource_type (only these lines under *Subject:*):
 - host: Host:, Instance (scrape):
 - probe: Target:, Module:
 - kafka: Topic:, Consumer group:, MSK job:
+- loki: Namespace:, optional Job:
 
 Do not include Summary, Evidence, Confidence, or any other sections.

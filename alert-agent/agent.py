@@ -10,6 +10,7 @@ from mcp_client import run_investigation
 from rca_formatter import format_rca
 from report_header import format_report_header
 from slack_client import send_alert_report
+from metrics import llm_investigations, slack_posts
 
 
 def _is_quota_error(exc: BaseException) -> bool:
@@ -22,14 +23,19 @@ def _is_quota_error(exc: BaseException) -> bool:
 
 def _run_rca(alert: dict, ctx, prefetched) -> str:
     if not LLM_ENABLED:
+        llm_investigations.labels(outcome="fallback").inc()
         return build_deterministic_rca(ctx, prefetched)
 
     try:
-        return asyncio.run(run_investigation(alert, prefetched=prefetched))
+        result = asyncio.run(run_investigation(alert, prefetched=prefetched))
+        llm_investigations.labels(outcome="success").inc()
+        return result
     except Exception as exc:
         if _is_quota_error(exc) or not LLM_ENABLED:
             print(f"LLM unavailable ({exc}); using deterministic RCA")
+            llm_investigations.labels(outcome="fallback").inc()
             return build_deterministic_rca(ctx, prefetched)
+        llm_investigations.labels(outcome="error").inc()
         raise
 
 
@@ -45,7 +51,9 @@ def _save_report(alert: dict, ctx, body: str) -> None:
     print(f"Alert report saved to {log_file}")
     try:
         send_alert_report(alert, report)
+        slack_posts.labels(outcome="success").inc()
     except Exception as exc:
+        slack_posts.labels(outcome="error").inc()
         print(f"Failed to send Slack alert report: {exc}")
 
 

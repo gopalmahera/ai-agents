@@ -1,3 +1,4 @@
+import time
 import requests
 
 from config import SLACK_WEBHOOK_URL
@@ -46,20 +47,28 @@ def _post_slack(text: str, labels: dict) -> None:
     if not SLACK_WEBHOOK_URL:
         raise ValueError("SLACK_WEBHOOK_URL is not set")
 
-    response = requests.post(
-        SLACK_WEBHOOK_URL,
-        json={
-            "attachments": [
-                {
-                    "color": _severity_color(labels),
-                    "text": text,
-                    "mrkdwn_in": ["text"],
-                }
-            ]
-        },
-        timeout=30,
-    )
-    response.raise_for_status()
+    payload = {
+        "attachments": [
+            {
+                "color": _severity_color(labels),
+                "text": text,
+                "mrkdwn_in": ["text"],
+            }
+        ]
+    }
+    delays = [2, 4, 8]
+    last_exc: Exception | None = None
+    for attempt, delay in enumerate(delays, start=1):
+        try:
+            response = requests.post(SLACK_WEBHOOK_URL, json=payload, timeout=30)
+            response.raise_for_status()
+            return
+        except Exception as exc:
+            last_exc = exc
+            if attempt < len(delays):
+                print(f"Slack post attempt {attempt} failed ({exc}); retrying in {delay}s")
+                time.sleep(delay)
+    raise last_exc
 
 
 def send_alert_status(payload: dict) -> None:
