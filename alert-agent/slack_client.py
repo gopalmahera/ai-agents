@@ -10,6 +10,8 @@ _SEVERITY_COLORS = {
     "info": "#36C5F0",
 }
 _DEFAULT_COLOR = "#808080"
+_BODY_COLOR = "#D3D3D3"
+_MAX_BODY_CHARS = 3800
 
 
 def format_alert_status(payload: dict) -> str:
@@ -43,19 +45,9 @@ def _severity_color(labels: dict) -> str:
     return _SEVERITY_COLORS.get(severity, _DEFAULT_COLOR)
 
 
-def _post_slack(text: str, labels: dict) -> None:
+def _post_slack(payload: dict) -> None:
     if not SLACK_WEBHOOK_URL:
         raise ValueError("SLACK_WEBHOOK_URL is not set")
-
-    payload = {
-        "attachments": [
-            {
-                "color": _severity_color(labels),
-                "text": text,
-                "mrkdwn_in": ["text"],
-            }
-        ]
-    }
     delays = [2, 4, 8]
     last_exc: Exception | None = None
     for attempt, delay in enumerate(delays, start=1):
@@ -75,9 +67,34 @@ def send_alert_status(payload: dict) -> None:
     labels = payload.get("commonLabels") or {}
     if not labels and payload.get("alerts"):
         labels = payload["alerts"][0].get("labels", {})
-    _post_slack(format_alert_status(payload), labels)
+    slack_payload = {
+        "attachments": [
+            {
+                "color": _severity_color(labels),
+                "text": format_alert_status(payload),
+                "mrkdwn_in": ["text"],
+            }
+        ]
+    }
+    _post_slack(slack_payload)
 
 
-def send_alert_report(alert: dict, report: str) -> None:
+def send_alert_report(alert: dict, header: str, body: str) -> None:
     labels = alert.get("labels", {})
-    _post_slack(report.strip(), labels)
+    if len(body) > _MAX_BODY_CHARS:
+        body = body[:_MAX_BODY_CHARS] + "\n\n_[Report truncated — see log file for full output]_"
+    slack_payload = {
+        "attachments": [
+            {
+                "color": _severity_color(labels),
+                "text": header,
+                "mrkdwn_in": ["text"],
+            },
+            {
+                "color": _BODY_COLOR,
+                "text": body,
+                "mrkdwn_in": ["text"],
+            },
+        ]
+    }
+    _post_slack(slack_payload)

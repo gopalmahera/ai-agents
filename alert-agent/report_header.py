@@ -1,4 +1,13 @@
+from datetime import datetime, timezone
+
 from alert_context import AlertContext
+
+
+_SEVERITY_EMOJI = {
+    "critical": ":rotating_light:",
+    "warning": ":warning:",
+    "info": ":information_source:",
+}
 
 
 def _region_line(ctx: AlertContext, labels: dict) -> str:
@@ -39,16 +48,48 @@ def _resource_line(ctx: AlertContext) -> str:
     return ""
 
 
-def format_report_header(ctx: AlertContext, labels: dict) -> str:
+def _format_started_at(alert: dict) -> str:
+    starts_at = alert.get("startsAt", "")
+    if not starts_at or starts_at.startswith("0001"):
+        return ""
+    try:
+        dt = datetime.fromisoformat(starts_at.replace("Z", "+00:00"))
+        return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    except Exception:
+        return ""
+
+
+def format_report_header(ctx: AlertContext, labels: dict, alert: dict | None = None) -> str:
     severity = labels.get("severity", "unknown")
-    lines = [f"RCA — {ctx.alertname} | severity: {severity}"]
+    emoji = _SEVERITY_EMOJI.get(severity.lower(), ":bell:")
 
-    region_line = _region_line(ctx, labels)
-    if region_line:
-        lines.append(region_line)
+    # Line 1: alert name + severity
+    lines = [f"{emoji} *{ctx.alertname}* | severity: {severity}"]
 
+    # Line 2: resource identity + started timestamp
+    meta_parts = []
     resource_line = _resource_line(ctx)
     if resource_line:
-        lines.append(resource_line)
+        meta_parts.append(resource_line)
+    region_line = _region_line(ctx, labels)
+    if region_line:
+        meta_parts.append(region_line)
+    started = _format_started_at(alert or {})
+    if started:
+        meta_parts.append(f"Started: {started}")
+    if meta_parts:
+        lines.append(" | ".join(meta_parts))
+
+    # Line 3: annotation summary (first line, capped at 150 chars)
+    annotations = (alert or {}).get("annotations", {})
+    summary = (annotations.get("summary") or annotations.get("description") or "").strip()
+    if summary:
+        first_line = summary.split("\n")[0][:150]
+        lines.append(f"_{first_line}_")
+
+    # Line 4: Prometheus query link
+    generator_url = (alert or {}).get("generatorURL", "")
+    if generator_url:
+        lines.append(f"<{generator_url}|View in Prometheus>")
 
     return "\n".join(lines)

@@ -41,7 +41,7 @@ def _run_rca(alert: dict, ctx, prefetched) -> str:
 
 def _save_report(alert: dict, ctx, body: str) -> None:
     labels = alert.get("labels", {})
-    header = format_report_header(ctx, labels)
+    header = format_report_header(ctx, labels, alert=alert)
     report = f"{header}\n\n{body.strip()}"
     print("=" * 80)
     print(f"Alert report for {ctx.alertname}")
@@ -50,7 +50,7 @@ def _save_report(alert: dict, ctx, body: str) -> None:
     log_file = save_rca(alert, report)
     print(f"Alert report saved to {log_file}")
     try:
-        send_alert_report(alert, report)
+        send_alert_report(alert, header, body.strip())
         slack_posts.labels(outcome="success").inc()
     except Exception as exc:
         slack_posts.labels(outcome="error").inc()

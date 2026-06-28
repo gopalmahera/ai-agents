@@ -78,15 +78,27 @@ class TestSlackClient(unittest.TestCase):
                 "severity": "critical",
             },
         }
-        report = (
-            "RCA — pod.restart.vitalsstream | severity: critical\n\n"
-            "*Findings:*\n• lag high"
-        )
-        send_alert_report(alert, report)
-        text = mock_post.call_args.kwargs["json"]["attachments"][0]["text"]
-        self.assertTrue(text.startswith("RCA — pod.restart.vitalsstream"))
-        self.assertIn("*Findings:*", text)
-        self.assertNotIn("[FIRING:1]", text)
+        header = ":rotating_light: *pod.restart.vitalsstream* | severity: critical"
+        body = "*Findings:*\n• lag high"
+        send_alert_report(alert, header, body)
+        attachments = mock_post.call_args.kwargs["json"]["attachments"]
+        # Header attachment is first (colored)
+        self.assertIn("pod.restart.vitalsstream", attachments[0]["text"])
+        self.assertEqual(attachments[0]["color"], "#E01E5A")
+        # Body is in second attachment
+        self.assertIn("*Findings:*", attachments[1]["text"])
+        self.assertNotIn("[FIRING:1]", attachments[0]["text"])
+
+    @patch("slack_client.requests.post")
+    @patch("slack_client.SLACK_WEBHOOK_URL", "https://hooks.slack.com/test")
+    def test_body_truncated_when_too_long(self, mock_post):
+        mock_post.return_value = MagicMock(status_code=200, raise_for_status=MagicMock())
+        alert = {"labels": {"alertname": "TestAlert", "severity": "warning"}}
+        long_body = "x" * 5000
+        send_alert_report(alert, "header", long_body)
+        body_text = mock_post.call_args.kwargs["json"]["attachments"][1]["text"]
+        self.assertLessEqual(len(body_text), 4000)
+        self.assertIn("truncated", body_text)
 
 
 if __name__ == "__main__":
