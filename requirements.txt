@@ -6,3 +6,5 @@ httpx
 requests
 mcp
 kubernetes
+prometheus_client
+pyyaml

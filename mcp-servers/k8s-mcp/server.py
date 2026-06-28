@@ -68,10 +68,25 @@ def _load_kube_config() -> None:
         config.load_kube_config()
 
 
-_load_kube_config()
+_K8S_UNAVAILABLE_MSG = {"error": "Kubernetes is not configured — no kubeconfig or in-cluster credentials available."}
+_K8S_AVAILABLE = True
+try:
+    _load_kube_config()
+except Exception as _exc:
+    _K8S_AVAILABLE = False
+    print(f"[k8s-mcp] WARNING: kubeconfig unavailable — k8s tools will return an error ({_exc})")
 
-core_v1 = client.CoreV1Api()
-apps_v1 = client.AppsV1Api()
+
+class _UnavailableApi:
+    """Placeholder when kubeconfig is missing — every method call returns an error dict."""
+    def __getattr__(self, name):
+        def _noop(*args, **kwargs):
+            raise client.exceptions.ApiException(status=503, reason="Kubernetes is not configured — no kubeconfig or in-cluster credentials available.")
+        return _noop
+
+
+core_v1 = client.CoreV1Api() if _K8S_AVAILABLE else _UnavailableApi()
+apps_v1 = client.AppsV1Api() if _K8S_AVAILABLE else _UnavailableApi()
 
 mcp = FastMCP(
     "kubernetes",

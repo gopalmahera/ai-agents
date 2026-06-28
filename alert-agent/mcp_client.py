@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from pydantic_ai import Agent
-from pydantic_ai.mcp import MCPServerStreamableHTTP
+from pydantic_ai.mcp import FastMCPClient, MCPToolset, StreamableHttpTransport
 
 from alert_context import alert_for_prompt, build_alert_context
 from config import (
@@ -17,12 +17,16 @@ from prefetch import prefetched_to_prompt_block
 PROMPT_PATH = Path(__file__).parent / "prompts" / "rca_prompt.txt"
 
 
+def _mcp(url: str, prefix: str):
+    return MCPToolset(FastMCPClient(transport=StreamableHttpTransport(url))).prefixed(prefix)
+
+
 def _build_toolsets():
     return [
-        MCPServerStreamableHTTP(K8S_MCP_URL, tool_prefix="k8s"),
-        MCPServerStreamableHTTP(PROMETHEUS_MCP_URL, tool_prefix="prom"),
-        MCPServerStreamableHTTP(LOKI_MCP_URL, tool_prefix="loki"),
-        MCPServerStreamableHTTP(KAFKA_MCP_URL, tool_prefix="kafka"),
+        _mcp(K8S_MCP_URL, "k8s"),
+        _mcp(PROMETHEUS_MCP_URL, "prom"),
+        _mcp(LOKI_MCP_URL, "loki"),
+        _mcp(KAFKA_MCP_URL, "kafka"),
     ]
 
 

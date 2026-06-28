@@ -11,9 +11,11 @@ services:
       - .env
     volumes:
       - ./logs:/app/logs
+      - ./alert-agent/routing.yaml:/app/alert-agent/routing.yaml:ro
     environment:
       PROMETHEUS_URL: ${PROMETHEUS_URL}
       LOKI_URL: ${LOKI_URL}
       LOGS_DIR: /app/logs
+      ROUTING_CONFIG_PATH: /app/alert-agent/routing.yaml
     extra_hosts:
       - "host.docker.internal:host-gateway"

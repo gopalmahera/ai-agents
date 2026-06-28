@@ -2,6 +2,7 @@ import time
 import requests
 
 from config import SLACK_WEBHOOK_URL
+from routing import resolve_webhook_url
 
 
 _SEVERITY_COLORS = {
@@ -45,14 +46,15 @@ def _severity_color(labels: dict) -> str:
     return _SEVERITY_COLORS.get(severity, _DEFAULT_COLOR)
 
 
-def _post_slack(payload: dict) -> None:
-    if not SLACK_WEBHOOK_URL:
-        raise ValueError("SLACK_WEBHOOK_URL is not set")
+def _post_slack(payload: dict, webhook_url: str = "") -> None:
+    url = webhook_url or SLACK_WEBHOOK_URL
+    if not url:
+        raise ValueError("No Slack webhook URL configured (set SLACK_WEBHOOK_URL or ROUTING_CONFIG_PATH)")
     delays = [2, 4, 8]
     last_exc: Exception | None = None
     for attempt, delay in enumerate(delays, start=1):
         try:
-            response = requests.post(SLACK_WEBHOOK_URL, json=payload, timeout=30)
+            response = requests.post(url, json=payload, timeout=30)
             response.raise_for_status()
             return
         except Exception as exc:
@@ -76,7 +78,7 @@ def send_alert_status(payload: dict) -> None:
             }
         ]
     }
-    _post_slack(slack_payload)
+    _post_slack(slack_payload, resolve_webhook_url(labels))
 
 
 def send_alert_report(alert: dict, header: str, body: str) -> None:
@@ -97,4 +99,4 @@ def send_alert_report(alert: dict, header: str, body: str) -> None:
             },
         ]
     }
-    _post_slack(slack_payload)
+    _post_slack(slack_payload, resolve_webhook_url(labels))

@@ -1,0 +1,41 @@
+# Slack channel routing rules for the AI alert agent.
+#
+# Rules are evaluated top-to-bottom; the first match wins.
+# Each rule must have a `slack_webhook_url` and at least one matcher.
+#
+# Matchers (all optional, AND-ed together):
+#   match:     exact label equality  { key: value, ... }
+#   match_re:  regex label match     { key: regex, ... }
+#
+# The fallback `default_slack_webhook_url` is used when no rule matches
+# (or when this file is absent / the env var ROUTING_CONFIG_PATH is unset).
+
+default_slack_webhook_url: "https://hooks.slack.com/services/DEFAULT/WEBHOOK"
+
+routes:
+  # Critical alerts in prod → #alerts-critical
+  - match:
+      severity: critical
+      stage: prod
+    slack_webhook_url: "https://hooks.slack.com/services/CRITICAL/PROD"
+
+  # Warning alerts in prod → #alerts-warning
+  - match:
+      severity: warning
+      stage: prod
+    slack_webhook_url: "https://hooks.slack.com/services/WARNING/PROD"
+
+  # All SIT/staging alerts → #alerts-sit
+  - match_re:
+      stage: "sit|staging"
+    slack_webhook_url: "https://hooks.slack.com/services/SIT/WEBHOOK"
+
+  # EC2 host alerts → #infra-alerts
+  - match_re:
+      alertname: "^EC2Host.*"
+    slack_webhook_url: "https://hooks.slack.com/services/INFRA/WEBHOOK"
+
+  # Kafka alerts → #kafka-alerts
+  - match_re:
+      alertname: "^(msk\\.|NetworkKafka).*"
+    slack_webhook_url: "https://hooks.slack.com/services/KAFKA/WEBHOOK"
