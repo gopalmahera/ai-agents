@@ -1,91 +1,200 @@
 # AI Alert Agent
 
-AI-powered Alertmanager webhook that investigates firing alerts with MCP tools (Kubernetes, Prometheus, Loki, Kafka/MSK) and posts structured RCAs to Slack.
+AI-powered Alertmanager webhook that automatically investigates firing alerts using live data from Kubernetes, Prometheus, Loki, and Kafka — then posts a structured Root Cause Analysis (RCA) to the right Slack channel.
 
-Everything runs in a **single container**: Flask webhook, OpenAI agent, and four MCP servers.
+Everything runs in a **single container**: Flask webhook, OpenAI GPT-4o agent, and four MCP tool servers.
 
-## Architecture
+---
 
-```mermaid
-flowchart LR
-    AM[Alertmanager] -->|POST /webhook| BOX[Single alert-agent container]
-    subgraph BOX[alert-agent container]
-        WH[Flask webhook]
-        AG[PydanticAI Agent]
-        K8sMCP[k8s-mcp :8001]
-        PromMCP[prometheus-mcp :8002]
-        LokiMCP[loki-mcp :8003]
-        KafkaMCP[kafka-mcp :8004]
-    end
-    AG --> K8sMCP
-    AG --> PromMCP
-    AG --> LokiMCP
-    AG --> KafkaMCP
-    AG --> SL[Slack]
+## How It Works
+
+```
+Alertmanager
+    │
+    │  POST /webhook
+    ▼
+┌─────────────────────────────────────────────────────┐
+│                  alert-agent container               │
+│                                                     │
+│  Flask webhook  ──►  Classify alert by type         │
+│                           │                         │
+│                           ▼                         │
+│                   PydanticAI Agent (GPT-4o)         │
+│                    │    │    │    │                  │
+│               k8s  prom loki kafka  ◄── MCP servers │
+│              :8001 :8002 :8003 :8004                │
+└─────────────────────────────────────────────────────┘
+    │
+    │  RCA report
+    ▼
+Slack channel  (routed by routing.yaml)
 ```
 
-## Local development (docker-compose)
+1. Alertmanager fires → `POST /webhook`
+2. Alert is classified by resource type: `kubernetes`, `host`, `probe`, `kafka`
+3. The LLM agent queries live MCP tools (pod events, Prometheus metrics, Loki logs, Kafka lag)
+4. Produces a structured RCA with **Findings**, **Probable Root Cause**, and **Recommended Actions**
+5. Posts the report to the configured Slack channel via `routing.yaml` rules
 
-1. Copy `.env.example` to `.env` and set `OPENAI_API_KEY`, `SLACK_WEBHOOK_URL`, `PROMETHEUS_URL`, `LOKI_URL`.
-2. Run:
+---
+
+## Alert Coverage
+
+| Alert Category | Resource Type | MCP Tools Used |
+|---|---|---|
+| Pod CPU / memory limits | `kubernetes` | k8s events + prom metrics + loki logs |
+| Pod OOM kill / eviction | `kubernetes` | k8s events + prom memory snapshot |
+| Pod anomaly (cpu/memory/network) | `kubernetes` | prom baseline comparison |
+| Pod restart | `kubernetes` | k8s events + loki logs |
+| EC2 host down / CPU / memory | `host` | prom node-exporter |
+| EC2 swap / inodes / disk latency | `host` | prom `get_node_advanced` |
+| EC2 systemd / RAID / clock / temp | `host` | prom `get_node_advanced` |
+| Blackbox HTTP / TCP probe | `probe` | prom probe metrics |
+| TLS certificate expiry | `probe` | prom probe metrics |
+| MSK / Kafka consumer lag | `kafka` | kafka lag + prom + loki |
+| Kafka broker throughput | `kafka` | kafka `get_broker_throughput` |
+
+---
+
+## Quick Start (Local)
+
+### 1. Configure environment
+
+```bash
+cp .env.example .env
+# Edit .env — set OPENAI_API_KEY, SLACK_WEBHOOK_URL, PROMETHEUS_URL, LOKI_URL
+```
+
+### 2. Configure Slack routing
+
+```bash
+cp alert-agent/routing.example.yaml alert-agent/routing.yaml
+# Edit routing.yaml — add your webhook URLs and match rules
+```
+
+### 3. Run
 
 ```bash
 docker compose up --build
 ```
 
-Health check:
+### 4. Verify
 
 ```bash
+# Health check
 curl http://localhost:5001/health
-```
 
-Sample webhook:
-
-```bash
+# Send a test alert
 curl -X POST http://localhost:5001/webhook \
   -H "Content-Type: application/json" \
   -d @sample/network-pod-high-transmit-alert.json
+
+# Prometheus metrics
+curl http://localhost:5001/metrics
 ```
 
-Local compose can reach Prometheus/Loki over the network. **Kubernetes tools** (`k8s-mcp`) use in-cluster ServiceAccount auth when deployed to the cluster — no host kubeconfig or AWS profile is required.
+---
 
-## Kubernetes deployment (dozee-dev / dozee-pro)
+## Slack Channel Routing
 
-Manifests live in [`deploy/k8s/ai-alert-agent.yaml`](deploy/k8s/ai-alert-agent.yaml) and are wired in Flux under `fluxcd-aws/clusters/*/monitoring/kube-prometheus-stack/`.
+Alerts are routed to different Slack channels using `alert-agent/routing.yaml`. Rules use the same `match` / `match_re` semantics as Alertmanager.
 
-### Build and push production image
+```yaml
+# alert-agent/routing.yaml
+
+default_slack_webhook_url: "https://hooks.slack.com/services/DEFAULT/..."
+
+routes:
+  # Critical prod alerts → #alerts-prod-critical
+  - match:
+      severity: critical
+      stage: prod
+    slack_webhook_url: "https://hooks.slack.com/services/CRITICAL/..."
+
+  # All EC2 / infra alerts → #infra-alerts
+  - match_re:
+      alertname: "^EC2Host.*"
+    slack_webhook_url: "https://hooks.slack.com/services/INFRA/..."
+
+  # Kafka alerts → #kafka-alerts
+  - match_re:
+      alertname: "^(msk\\.|NetworkKafka).*"
+    slack_webhook_url: "https://hooks.slack.com/services/KAFKA/..."
+```
+
+**Rules:**
+- Evaluated **top-to-bottom**; first match wins
+- `match` — exact label equality (all keys must match, AND logic)
+- `match_re` — regex per label value
+- Both can be combined in one rule
+- Falls back to `default_slack_webhook_url`, then `SLACK_WEBHOOK_URL` env var
+
+The file is **volume-mounted** — edit it and restart the container; no image rebuild needed.
+
+---
+
+## RCA Output Format
+
+Each Slack post has two attachments — a colored header and a body:
+
+**Header** (colored by severity):
+```
+🚨 *PODCPULimitsUage>=90* | severity: critical
+Namespace: dozeeplatform | Pod: consumer-abc | Region: ap-south-1 | Started: 2026-06-28 11:30 UTC
+_Pod CPU usage exceeded 90% of its limit for 5+ minutes_
+<https://prometheus/graph?...|View in Prometheus>
+```
+
+**Body:**
+```
+*Findings:*
+• CPU throttling at 94% over the last 10 minutes
+• Pod consumer-abc restarted 2 times in the last hour
+• Loki logs show repeated timeout errors at 11:28 UTC
+
+*Probable Root Cause:*
+Consumer thread pool saturated by a spike in Kafka message volume at 11:27 UTC.
+
+*Recommended Actions:*
+1. Scale the consumer deployment horizontally (currently 2 replicas)
+2. Increase CPU limit from 500m to 1000m
+3. Check upstream producer for message volume spike
+```
+
+---
+
+## Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `OPENAI_API_KEY` | _(required)_ | OpenAI API key |
+| `OPENAI_MODEL` | `gpt-4o` | Model to use |
+| `SLACK_WEBHOOK_URL` | _(optional)_ | Fallback Slack webhook when no routing rule matches |
+| `ROUTING_CONFIG_PATH` | _(optional)_ | Path to `routing.yaml` inside the container |
+| `PROMETHEUS_URL` | cluster default | Prometheus base URL |
+| `LOKI_URL` | cluster default | Loki base URL |
+| `LOGS_DIR` | `/app/logs` | Directory for saved RCA log files |
+| `DEDUP_TTL_SECONDS` | `900` | Ignore duplicate fingerprints for this many seconds |
+| `ALLOWED_ALERTNAMES` | _(unset = all)_ | Regex filter — only process matching alert names |
+| `LLM_ENABLED` | `true` | Set `false` to use deterministic RCA fallback only |
+
+---
+
+## Kubernetes Deployment
+
+Manifests: [`deploy/k8s/ai-alert-agent.yaml`](deploy/k8s/ai-alert-agent.yaml)
+
+### Build and push image
 
 ```bash
-chmod +x deploy/build-push.sh
-
-# Tags image with git tag (if on a tag) or short SHA; pushes to ECR
+# Tag with git tag or short SHA; push to ECR
 TAG=1.0.1 ./deploy/build-push.sh
 
 # Also push :latest
 TAG=1.0.1 TAG_LATEST=true ./deploy/build-push.sh
-
-# Build only, no push
-PUSH=false ./deploy/build-push.sh
 ```
 
-**Important:** EKS nodes are `linux/amd64`. On Apple Silicon Macs, always build with `--platform linux/amd64` (the script does this by default). A plain `docker build .` without platform causes `exec format error` in the cluster.
-
-```bash
-# Wrong on M1/M2 Mac (builds arm64)
-docker build -t ai-alert-agent .
-
-# Correct for EKS
-docker build --platform linux/amd64 -t ai-alert-agent .
-```
-
-Production image properties:
-
-- Multi-stage build with pinned `python:3.12.8-slim-bookworm`
-- Non-root user (`uid 10001`)
-- Gunicorn WSGI server (1 worker, 8 threads — MCP servers are single-process)
-- MCP readiness wait before accepting traffic
-- OCI image labels (`version`, `revision`, `build date`)
-- Built-in `HEALTHCHECK` on `/health`
+> **Apple Silicon note:** EKS nodes are `linux/amd64`. The build script sets `--platform linux/amd64` automatically. Never run a plain `docker build .` from an M1/M2 Mac for production.
 
 ### Create secrets (once per cluster)
 
@@ -97,50 +206,106 @@ kubectl -n monitoring create secret generic ai-alert-agent-secrets \
 
 ### In-cluster URLs
 
-| Env | Value |
+| Variable | Value |
 |---|---|
 | `PROMETHEUS_URL` | `http://service-gps.monitoring.svc.cluster.local:9090` |
 | `LOKI_URL` | `http://loki-gateway.monitoring.svc.cluster.local` |
-| k8s auth | ServiceAccount `ai-alert-agent` (in-cluster) |
+| Kubernetes auth | ServiceAccount `ai-alert-agent` (in-cluster, no kubeconfig needed) |
 
-Alertmanager receiver `ai-alert-agent` uses `continue: true` so existing Slack routes are unchanged.
+Alertmanager receiver `ai-alert-agent` uses `continue: true` — existing Slack routes are unchanged.
 
-## Alert coverage
+---
 
-| Category | Tools |
-|---|---|
-| Pod CPU/memory/restart/anomaly/OOM | k8s + prom + loki |
-| MSK lag / no-message | kafka + prom + k8s/loki |
-| EC2 host (`EC2Host*`) | prom node-exporter helpers |
-| Blackbox / TLS | prom probe helpers |
-| Loki-sourced alerts | deferred (Phase 5) |
+## MCP Servers
+
+| Server | Port | Tools |
+|---|---|---|
+| `k8s-mcp` | 8001 | `get_pods`, `get_events`, `get_deployment`, `get_pod_logs`, `describe_pod`, … |
+| `prometheus-mcp` | 8002 | `query_promql`, `get_pod_cpu/memory`, `get_node_memory/load`, `get_node_advanced`, `get_probe_*`, … |
+| `loki-mcp` | 8003 | `query_logs`, `get_pod_logs`, `get_error_logs` |
+| `kafka-mcp` | 8004 | `get_consumer_lag`, `get_broker_throughput`, `list_topics`, … |
+
+Tools are exposed with prefixes (`k8s_`, `prom_`, `loki_`, `kafka_`) so the LLM knows which server each tool belongs to.
+
+---
 
 ## Guardrails
 
-- **Dedup:** same `fingerprint` ignored for `DEDUP_TTL_SECONDS` (default 900s)
-- **Allowlist:** optional `ALLOWED_ALERTNAMES` regex env
-- **Slack header:** alertname, severity, namespace/pod/instance on every RCA
+| Feature | Detail |
+|---|---|
+| **Deduplication** | Same alert `fingerprint` is ignored for `DEDUP_TTL_SECONDS` (default 15 min) |
+| **Allowlist filter** | `ALLOWED_ALERTNAMES` regex — drop alerts not matching |
+| **LLM fallback** | If OpenAI is unavailable or quota exceeded, falls back to a deterministic RCA using prefetched metrics |
+| **Body truncation** | Slack body capped at 3,800 chars with a truncation notice |
+| **Retry on Slack** | Up to 3 attempts with exponential backoff (2s → 4s → 8s) |
+| **k8s degraded mode** | If no kubeconfig is available (local dev), k8s tools return an error dict instead of crashing |
 
-## RCA output format
+---
 
-Kubernetes alerts:
+## Running Tests
 
-```text
-Namespace: dozeedb
-Pod: athenaworker-6f4cd88ccb-nl5vw
+```bash
+# Create venv (first time)
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt pytest
 
-Findings:
-- ...
-
-Probable Root Cause:
-...
-
-Recommended Actions:
-1. ...
+# Run all tests
+PYTHONPATH=alert-agent .venv/bin/python -m pytest alert-agent/test_*.py -v
 ```
 
-EC2, Blackbox, and MSK alerts use alternate headers documented in [`alert-agent/prompts/rca_prompt.txt`](alert-agent/prompts/rca_prompt.txt).
+---
 
-## Logs
+## Project Structure
 
-Investigations are saved under `logs/` (PVC `/app/logs` in cluster).
+```
+ai-agents/
+├── alert-agent/
+│   ├── app.py                  # Flask webhook server
+│   ├── agent.py                # Alert investigation orchestration
+│   ├── mcp_client.py           # PydanticAI agent + MCP toolset setup
+│   ├── alert_context.py        # Alert classification and context building
+│   ├── alert_catalog.py        # One-line alert descriptions (42 entries)
+│   ├── routing.py              # Slack channel routing engine
+│   ├── routing.yaml            # Routing rules (edit this)
+│   ├── routing.example.yaml    # Annotated example routing config
+│   ├── slack_client.py         # Slack posting with retry and truncation
+│   ├── report_header.py        # Rich Slack header formatting
+│   ├── rca_formatter.py        # RCA post-processing and formatting
+│   ├── deterministic_rca.py    # LLM-free fallback RCA
+│   ├── prefetch.py             # Pre-fetches metrics before LLM call
+│   ├── config.py               # Environment variable config
+│   ├── metrics.py              # Prometheus metrics (counters)
+│   ├── log_writer.py           # Saves RCA reports to disk
+│   └── prompts/
+│       └── rca_prompt.txt      # LLM system prompt with tool hints
+├── mcp-servers/
+│   ├── k8s-mcp/server.py       # Kubernetes MCP server
+│   ├── prometheus-mcp/server.py# Prometheus MCP server
+│   ├── loki-mcp/server.py      # Loki MCP server
+│   └── kafka-mcp/server.py     # Kafka/MSK MCP server
+├── deploy/
+│   ├── k8s/ai-alert-agent.yaml # Kubernetes manifests
+│   └── build-push.sh           # ECR build + push script
+├── sample/                     # Sample Alertmanager payloads for testing
+├── Dockerfile
+├── docker-compose.yml
+├── requirements.txt
+└── start.sh                    # Container entrypoint
+```
+
+---
+
+## Future Improvements
+
+- **Persistent dedup store** — replace in-memory dedup with Redis/SQLite so restarts don't re-trigger investigations
+- **Alert queue** — bounded work queue instead of unbounded threads to handle alert storms gracefully
+- **Runbook links** — add `runbook_url` per alert in catalog; append to every RCA
+- **Multi-alert correlation** — group alerts firing on the same node/namespace into a single RCA
+- **Historical comparison** — compare current metric values against 7-day baselines to flag recurring issues
+- **Confidence score** — LLM rates certainty (low/medium/high); low-confidence RCAs flagged in Slack
+- **`/webhook/test` endpoint** — synchronous RCA without Slack post, for local testing and CI
+- **`routing.yaml` hot-reload** — reload routes without container restart (`POST /reload` endpoint)
+- **Structured JSON logs** — replace `print()` with structured logging for Loki/CloudWatch ingestion
+- **Grafana dashboard** — visualize `alerts_received`, `llm_investigations`, `slack_posts` with latency histograms
+- **Multi-tenant routing** — route different alert groups to different OpenAI keys or models (e.g. GPT-4o-mini for `info` severity)
+- **Helm chart** — package manifests with `routing.yaml` as a ConfigMap value for GitOps-native management
