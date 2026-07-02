@@ -1,0 +1,22 @@
+# MSK/Kafka topics used to expand consumer-lag and nomessage alert catalog entries.
+topics:
+  - wss.vitalsstream
+  - misc.ecgstream
+  - wss.vitals.kims
+  - compute.events.raw
+  - compute.events.processed
+  - kbc.events.raw
+  - vitals.raw
+  - ecg.raw
+  - device.telemetry
+  - user.events
+  - notification.stream
+  - analytics.events
+  - platform.metrics
+  - patient.vitals
+  - patient.ecg
+  - emr.integration
+  - lab.results
+  - appointment.events
+  - warehouse.ingest
+  - realtime.dashboard

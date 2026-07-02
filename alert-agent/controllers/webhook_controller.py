@@ -1,4 +1,4 @@
-import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from flask import Flask, jsonify, request, Response
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
@@ -14,6 +14,21 @@ from utils.metrics import (
     alerts_skipped,
     alerts_accepted,
 )
+from utils.log import get_logger
+
+logger = get_logger(__name__)
+
+_executor: ThreadPoolExecutor | None = None
+
+
+def _get_executor() -> ThreadPoolExecutor:
+    global _executor
+    if _executor is None:
+        _executor = ThreadPoolExecutor(
+            max_workers=_cfg.INVESTIGATION_MAX_WORKERS,
+            thread_name_prefix="investigate",
+        )
+    return _executor
 
 
 def _is_allowed_alertname(alertname: str) -> bool:
@@ -87,7 +102,7 @@ def create_app() -> Flask:
         try:
             log_incoming_payload(payload)
         except Exception as exc:
-            print(f"Failed to log incoming payload: {exc}")
+            logger.warning("Failed to log incoming payload: %s", exc, exc_info=exc)
 
         group_status = payload.get("status", "unknown")
         alerts = payload.get("alerts", [])
@@ -96,8 +111,11 @@ def create_app() -> Flask:
             try:
                 send_alert_status(payload)
             except Exception as exc:
-                print(f"Failed to send Slack status notification: {exc}")
-            print(f"Resolved webhook processed for {len(alerts)} alert(s)")
+                logger.warning("Failed to send Slack status notification: %s", exc, exc_info=exc)
+            logger.info(
+                "Resolved webhook processed",
+                extra={"event": "webhook_resolved", "outcome": "resolved", "alerts": len(alerts)},
+            )
             return jsonify({"status": "ok", "alerts_received": len(alerts), "accepted": 0})
 
         accepted = 0
@@ -107,45 +125,58 @@ def create_app() -> Flask:
             status = alert.get("status", "unknown")
             fingerprint = alert.get("fingerprint", "missing")
 
-            print(
-                f"Received alert alertname={alertname} status={status} fingerprint={fingerprint}"
+            logger.info(
+                "Alert received",
+                extra={
+                    "event": "alert_received",
+                    "alertname": alertname,
+                    "fingerprint": fingerprint,
+                    "outcome": status,
+                },
             )
             _redis.counter_inc("alerts_received")
             alerts_received.labels(alertname=alertname).inc()
             _redis.alertname_inc(alertname)
 
             if status != "firing":
-                print(f"Skipping alert alertname={alertname} because status={status}")
+                logger.info(
+                    "Alert skipped — non-firing status",
+                    extra={"event": "alert_skipped", "alertname": alertname, "outcome": status},
+                )
                 _redis.counter_inc("alerts_skipped")
                 alerts_skipped.inc()
                 continue
 
             if not _is_allowed_alertname(alertname):
-                print(f"Skipping alert alertname={alertname} — not in ALLOWED_ALERTNAMES")
+                logger.info(
+                    "Alert skipped — allowlist filter",
+                    extra={"event": "alert_skipped", "alertname": alertname, "outcome": "allowlist"},
+                )
                 _redis.counter_inc("alerts_skipped")
                 alerts_skipped.inc()
                 continue
 
             if _is_duplicate(fingerprint):
-                print(
-                    f"Skipping duplicate alert alertname={alertname} fingerprint={fingerprint}"
+                logger.info(
+                    "Alert skipped — duplicate fingerprint",
+                    extra={
+                        "event": "alert_deduplicated",
+                        "alertname": alertname,
+                        "fingerprint": fingerprint,
+                    },
                 )
                 _redis.counter_inc("alerts_deduplicated")
                 alerts_deduplicated.inc()
                 continue
 
-            thread = threading.Thread(
-                target=_investigate_in_background,
-                args=(alert,),
-                daemon=True,
-            )
-            thread.start()
+            _get_executor().submit(_investigate_in_background, alert)
             _redis.counter_inc("alerts_accepted")
             alerts_accepted.inc()
             _redis.stream_add(
                 alertname=alertname,
                 outcome="accepted",
                 namespace=alert.get("labels", {}).get("namespace", ""),
+                fingerprint=fingerprint,
             )
             accepted += 1
 

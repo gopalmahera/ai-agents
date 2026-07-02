@@ -28,18 +28,18 @@ The **AI Alert Agent** automates this investigation. It receives the alert, quer
 | **Kafka Tool (kafka-mcp)** | Queries consumer lag, broker throughput, topic health |
 | **Slack Reporter** | Posts formatted RCA with color-coded severity to the right channel |
 
-All components run in a **single Docker container** — one deployment, no external dependencies beyond OpenAI API.
+All components run in the **alert-agent container** (with four embedded MCP servers), backed by a **Redis** instance for dedup, counters, and shared config.
 
 ---
 
 ## What We Delivered (This Phase)
 
-### 1. Alert Coverage — 153 Rules Fully Mapped
+### 1. Alert Coverage — 155 Rules in Catalog
 
-We analyzed all 153 production alerting rules and ensured every alert type has:
-- A one-line human-readable description (alert catalog)
-- The correct investigation tools assigned
-- Specific hints for the AI on what to look for
+The repo ships `config/alert_catalog.yaml` with **155 alert entries** (static rules + MSK topic expansion), each with:
+- A one-line human-readable description
+- A runbook URL shown in the Slack RCA header
+- Pattern-based fallbacks for dynamic `msk.*` alert names
 
 **Alert types now covered:**
 
@@ -82,6 +82,8 @@ Each investigation now produces a two-part Slack message:
 - Namespace / pod / region / started time
 - One-line summary from Prometheus annotations
 - Direct link to the Prometheus graph that triggered the alert
+- Direct link to the alert runbook (when defined in the catalog)
+- Recurring-alert flag when the same fingerprint fired 3+ times in 7 days
 
 **Body:**
 - Findings (bullet points of what the AI observed)
@@ -110,7 +112,10 @@ swap usage, inode free space, disk read/write latency, failed systemd services, 
 | **Alert deduplication** | Same alert firing twice within 15 minutes is suppressed (configurable); backed by Redis so dedup survives container restarts |
 | **Slack retry with backoff** | Failed Slack posts retry up to 3 times (2s → 4s → 8s delay) |
 | **k8s graceful degradation** | If no Kubernetes credentials are available (local dev), k8s tools return a clear error instead of crashing the container |
-| **Body truncation** | RCA body is capped at 3,800 characters with a notice — prevents Slack API rejections |
+| **Alert storm protection** | Investigations run on a bounded `ThreadPoolExecutor` (default 8 workers) instead of unbounded threads |
+| **Recurring alert detection** | Alerts with the same fingerprint 3+ times in 7 days are flagged in the Slack header |
+| **Cost optimization** | `info`-severity alerts use `gpt-4o-mini` by default (`OPENAI_MODEL_INFO`) |
+| **Structured JSON logs** | Webhook intake, investigation, config sync, and errors emit JSON logs to stdout |
 
 ---
 
@@ -122,6 +127,7 @@ The agent exposes Prometheus metrics at `/metrics` and a Web UI stats API at `/a
 |---|---|
 | `alert_agent_alerts_received_total` | Total alerts received per alert name |
 | `alert_agent_alerts_accepted_total` | Alerts that passed dedup and allowlist filters |
+| `alert_agent_alerts_skipped_total` | Alerts skipped (non-firing status or allowlist filter) |
 | `alert_agent_alerts_deduplicated_total` | Duplicate alerts suppressed |
 | `alert_agent_llm_investigations_total` | LLM calls by outcome (success / fallback / error) |
 | `alert_agent_slack_posts_total` | Slack posts by outcome (success / error) |
@@ -132,7 +138,7 @@ Redis also stores the same counters for the Web UI dashboard and HA replicas.
 
 ### 7. Test Coverage
 
-78+ automated tests covering:
+96+ automated tests covering:
 - Alert routing (match/regex/first-match/fallback)
 - Slack formatting (header, body, truncation, color)
 - Alert context classification (pod vs host vs Kafka vs probe)
@@ -163,25 +169,19 @@ The following improvements are recommended for the next phase, prioritized by bu
 
 | Improvement | Business Value |
 |---|---|
-| **Runbook links in RCA** | Each alert links directly to the runbook in the Slack message — reduces MTTR for common issues |
-| **Complete alert catalog in repo** | 42 built-in descriptions today; expand `config/alert_catalog.yaml` to cover all 153 production rules |
+| **Multi-alert correlation** | When 5 pods on the same node go down simultaneously, produce one grouped RCA instead of 5 separate ones |
 
 ### Medium Priority
 
 | Improvement | Business Value |
 |---|---|
-| **Multi-alert correlation** | When 5 pods on the same node go down simultaneously, produce one grouped RCA instead of 5 separate ones |
-| **Historical comparison** | Flag alerts that have fired 3+ times in the past week as "recurring" — helps prioritize permanent fixes over repeated mitigations |
 | **Confidence score** | AI rates its certainty (Low / Medium / High) — low-confidence RCAs are flagged so engineers know to investigate manually |
-| **Structured JSON logs** | Current logs use `print()` — structured logging enables log queries in Loki/CloudWatch for audit and debugging |
 
 ### Lower Priority / Nice to Have
 
 | Improvement | Business Value |
 |---|---|
 | **Grafana dashboard** | Visualize alert volume, LLM success rate, and Slack delivery reliability over time |
-| **Alert storm protection** | Bounded queue prevents runaway thread creation during mass-firing incidents |
-| **Cost optimization** | Route `info`-severity alerts to GPT-4o-mini instead of GPT-4o — same quality for low-stakes alerts at ~10x lower API cost |
 | **Helm chart** | Package as a Helm chart for GitOps-native deployment and easier version management across clusters |
 | **Slack slash commands** | `/rca replay <alert>` — replay a past alert through the agent; `/rca status` — show current agent health from Slack |
 
@@ -207,10 +207,10 @@ Cost optimization (GPT-4o-mini for info/warning severity) could reduce this by 6
 | Area | Before | After |
 |---|---|---|
 | Alert investigation time | 15–30 min manual | < 2 min automated |
-| Alert types covered | ~7 (basic pods only) | 153 rules across 5 categories |
+| Alert types covered | ~7 (basic pods only) | 155 catalog entries across 5 categories |
 | Slack routing | Single channel | Per-channel by label rules |
-| RCA quality | Manual, inconsistent | Structured, reproducible, severity-colored |
-| Reliability | No fallback | LLM fallback + retry + Redis-backed dedup |
-| Observability | None | Prometheus `/metrics` + Web UI stats API |
-| Test coverage | 0 | 78+ automated tests |
+| RCA quality | Manual, inconsistent | Structured, reproducible, severity-colored, runbook-linked |
+| Reliability | No fallback | LLM fallback + retry + Redis-backed dedup + bounded worker pool |
+| Observability | None | Prometheus `/metrics` + Web UI stats API + JSON logs |
+| Test coverage | 0 | 96+ automated tests |
 | Config updates | Rebuild container | Web UI / API hot-reload via Redis |

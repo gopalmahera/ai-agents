@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import re
 
-from models.catalog import get_alert_meaning
+from models.catalog import get_alert_meaning, get_runbook_url
 from services.classification.alert_classifier import AlertContext
 from services.metrics.host_metrics import build_findings_bullets, default_host_actions
 from services.metrics.kafka_metrics import build_findings_bullets as build_kafka_findings_bullets
@@ -92,7 +92,17 @@ def format_report_header(ctx: AlertContext, labels: dict, alert: dict | None = N
         first_line = summary.split("\n")[0][:150]
         lines.append(f"_{first_line}_")
 
-    # Line 4: Prometheus query link
+    # Line 4: runbook link (when catalog provides one)
+    runbook_url = get_runbook_url(ctx.alertname)
+    if runbook_url:
+        lines.append(f"<{runbook_url}|View runbook>")
+
+    # Line 5: recurrence flag
+    recurrence = (alert or {}).get("_recurrence_count")
+    if recurrence and recurrence >= 3:
+        lines.append(f":repeat: *Recurring:* fired {recurrence} times in the last 7 days")
+
+    # Prometheus query link
     generator_url = (alert or {}).get("generatorURL", "")
     if generator_url:
         lines.append(f"<{generator_url}|View in Prometheus>")

@@ -72,5 +72,17 @@ class TestRunInvestigation(unittest.IsolatedAsyncioTestCase):
         self.assertIn("restart_count", prompt_arg)
 
 
+class TestModelSelection(unittest.TestCase):
+    @patch("services.llm.mcp_client._cfg")
+    def test_info_severity_uses_mini_model(self, mock_cfg):
+        from services.llm.mcp_client import _model_string
+
+        mock_cfg.AI_PROVIDER = "openai"
+        mock_cfg.OPENAI_MODEL = "gpt-4o"
+        mock_cfg.OPENAI_MODEL_INFO = "gpt-4o-mini"
+        self.assertEqual(_model_string("info"), "openai-chat:gpt-4o-mini")
+        self.assertEqual(_model_string("critical"), "openai-chat:gpt-4o")
+
+
 if __name__ == "__main__":
     unittest.main()

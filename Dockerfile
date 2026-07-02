@@ -48,6 +48,7 @@ WORKDIR /app
 
 COPY --chown=appuser:appuser mcp-servers/ ./mcp-servers/
 COPY --chown=appuser:appuser alert-agent/ ./alert-agent/
+COPY --chown=appuser:appuser config/ ./config/
 COPY --chown=appuser:appuser start.sh .
 
 RUN sed -i 's/\r$//' start.sh \

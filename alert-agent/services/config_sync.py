@@ -17,6 +17,9 @@ import time
 
 import services.store.redis_client as _redis
 from services import config_store
+from utils.log import get_logger
+
+logger = get_logger(__name__)
 
 POLL_SECONDS = 30
 RETRY_SECONDS = 5
@@ -30,7 +33,7 @@ def _apply(version: int) -> None:
     config_store.apply_stored()
     _reset_routing_cache()
     _applied_version = version
-    print(f"[config_sync] Applied shared config (version {version})")
+    logger.info("Applied shared config", extra={"event": "config_sync", "version": version})
 
 
 def _reset_routing_cache() -> None:
@@ -68,7 +71,10 @@ def _run() -> None:
                 _apply_if_newer()
                 last_check = time.monotonic()
         except Exception as exc:
-            print(f"[config_sync] Sync error: {exc} — retrying in {RETRY_SECONDS}s")
+            logger.warning(
+                "Config sync error — retrying",
+                extra={"event": "config_sync_error", "error": str(exc), "retry_seconds": RETRY_SECONDS},
+            )
             try:
                 if pubsub is not None:
                     pubsub.close()

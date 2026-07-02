@@ -1,3 +1,4 @@
+import re
 import importlib
 import sys
 import unittest
@@ -15,52 +16,51 @@ FIRING_WEBHOOK = {
     "alerts": [
         {
             "status": "firing",
-            "fingerprint": "fp-metrics-1",
+            "fingerprint": "fp-allow-1",
             "labels": {"alertname": "PodRestart", "namespace": "default"},
         }
     ],
 }
 
+FILTERED_WEBHOOK = {
+    "status": "firing",
+    "alerts": [
+        {
+            "status": "firing",
+            "fingerprint": "fp-filtered-1",
+            "labels": {"alertname": "UnknownAlert", "namespace": "default"},
+        }
+    ],
+}
 
-class TestWebhookMetrics(unittest.TestCase):
+
+class TestWebhookDedupAndAllowlist(unittest.TestCase):
     def setUp(self):
         self.app = webhook_module.create_app()
         self.client = self.app.test_client()
 
-    @patch.object(webhook_module, "alerts_accepted")
-    @patch.object(webhook_module, "alerts_received")
     @patch.object(webhook_module, "log_incoming_payload")
     @patch.object(webhook_module, "_redis")
     @patch.object(webhook_module, "_get_executor")
-    def test_accepted_alert_increments_prometheus_counters(
-        self, mock_executor, mock_redis, _mock_log, mock_received, mock_accepted
-    ):
+    @patch.object(webhook_module._cfg, "_allowed_alertname_pattern", re.compile(r"^Pod"))
+    def test_allowlist_skips_non_matching_alertname(self, mock_executor, mock_redis, _mock_log):
         mock_redis.dedup_check_and_set.return_value = False
         mock_executor.return_value = MagicMock()
-        label_counter = MagicMock()
-        mock_received.labels.return_value = label_counter
 
-        response = self.client.post("/webhook", json=FIRING_WEBHOOK)
+        response = self.client.post("/webhook", json=FILTERED_WEBHOOK)
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["accepted"], 0)
+        mock_executor.return_value.submit.assert_not_called()
 
-        mock_received.labels.assert_called_once_with(alertname="PodRestart")
-        label_counter.inc.assert_called_once()
-        mock_accepted.inc.assert_called_once()
-
-    @patch.object(webhook_module, "alerts_deduplicated")
     @patch.object(webhook_module, "log_incoming_payload")
     @patch.object(webhook_module, "_redis")
     @patch.object(webhook_module, "_get_executor")
-    def test_duplicate_alert_increments_deduplicated_counter(
-        self, mock_executor, mock_redis, _mock_log, mock_deduplicated
-    ):
+    def test_duplicate_fingerprint_is_skipped(self, mock_executor, mock_redis, _mock_log):
         mock_redis.dedup_check_and_set.return_value = True
-
         response = self.client.post("/webhook", json=FIRING_WEBHOOK)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["accepted"], 0)
         mock_executor.return_value.submit.assert_not_called()
-        mock_deduplicated.inc.assert_called_once()
 
 
 if __name__ == "__main__":

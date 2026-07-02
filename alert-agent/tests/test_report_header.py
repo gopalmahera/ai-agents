@@ -67,6 +67,18 @@ class TestReportHeader(unittest.TestCase):
         header = format_report_header(_k8s_ctx(), labels, alert=alert)
         self.assertNotIn("Started:", header)
 
+    def test_includes_runbook_link(self):
+        labels = {"severity": "critical"}
+        header = format_report_header(_k8s_ctx(), labels)
+        self.assertIn("View runbook", header)
+
+    def test_includes_recurrence_flag(self):
+        labels = {"severity": "warning"}
+        alert = {"_recurrence_count": 4}
+        header = format_report_header(_k8s_ctx(), labels, alert=alert)
+        self.assertIn("Recurring", header)
+        self.assertIn("4 times", header)
+
 
 if __name__ == "__main__":
     unittest.main()

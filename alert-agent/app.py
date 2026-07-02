@@ -3,6 +3,9 @@ from api.config_api import bp as config_bp
 from api.metrics_api import bp as metrics_bp
 from api.logs_api import bp as logs_bp
 from services import config_sync
+from utils.log import setup_logging
+
+setup_logging()
 
 app = create_app()
 app.register_blueprint(config_bp)

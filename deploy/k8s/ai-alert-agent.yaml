@@ -49,6 +49,82 @@ subjects:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
+  name: ai-alert-agent-redis
+  namespace: monitoring
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-alert-agent-redis
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-alert-agent-redis
+  template:
+    metadata:
+      labels:
+        app: ai-alert-agent-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          args: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
+          ports:
+            - containerPort: 6379
+              name: redis
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: redis-data
+          persistentVolumeClaim:
+            claimName: ai-alert-agent-redis
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-alert-agent-redis
+  namespace: monitoring
+spec:
+  type: ClusterIP
+  ports:
+    - port: 6379
+      targetPort: redis
+      protocol: TCP
+  selector:
+    app: ai-alert-agent-redis
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
   name: ai-alert-agent-logs
   namespace: monitoring
 spec:
@@ -107,6 +183,12 @@ spec:
               value: '900'
             - name: ALERT_CATALOG_PATH
               value: /app/config/alert_catalog.yaml
+            - name: REDIS_URL
+              value: redis://ai-alert-agent-redis.monitoring.svc.cluster.local:6379/0
+            - name: INVESTIGATION_MAX_WORKERS
+              value: '8'
+            - name: RUNBOOK_BASE_URL
+              value: https://wiki.dozee.internal/runbooks
           livenessProbe:
             httpGet:
               path: /health
@@ -129,16 +211,10 @@ spec:
           volumeMounts:
             - name: logs
               mountPath: /app/logs
-            - name: catalog
-              mountPath: /app/config
-              readOnly: true
       volumes:
         - name: logs
           persistentVolumeClaim:
             claimName: ai-alert-agent-logs
-        - name: catalog
-          configMap:
-            name: ai-alert-agent-catalog
 
 ---
 apiVersion: v1

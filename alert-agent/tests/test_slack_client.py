@@ -100,6 +100,17 @@ class TestSlackClient(unittest.TestCase):
         self.assertLessEqual(len(body_text), 4000)
         self.assertIn("truncated", body_text)
 
+    @patch("services.notification.slack_client.time.sleep")
+    @patch("services.notification.slack_client.requests.post")
+    @patch("services.notification.slack_client.SLACK_WEBHOOK_URL", "https://hooks.slack.com/test")
+    def test_retries_on_failure(self, mock_post, mock_sleep):
+        failing = MagicMock(raise_for_status=MagicMock(side_effect=Exception("network error")))
+        success = MagicMock(raise_for_status=MagicMock())
+        mock_post.side_effect = [failing, failing, success]
+        send_alert_status(FIRING_PAYLOAD)
+        self.assertEqual(mock_post.call_count, 3)
+        self.assertEqual(mock_sleep.call_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

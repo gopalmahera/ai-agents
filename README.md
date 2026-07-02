@@ -92,10 +92,15 @@ docker compose up --build
 # Health check
 curl http://localhost:5001/health
 
-# Send a test alert
+# Send a test alert (async — posts to Slack)
 curl -X POST http://localhost:5001/webhook \
   -H "Content-Type: application/json" \
   -d @sample/network-pod-high-transmit-alert.json
+
+# Test RCA synchronously (no Slack post)
+curl -X POST http://localhost:5001/webhook/test \
+  -H "Content-Type: application/json" \
+  -d @sample/pod-cpu-limits-usage-alert.json
 
 # Prometheus metrics
 curl http://localhost:5001/metrics
@@ -138,6 +143,9 @@ GET      /api/metrics/stats           counters from Redis
 GET      /api/reports/summary?days=7  aggregated alert history from Redis stream
 GET      /api/logs, /api/logs/{name}  log file browser
 GET      /api/redis/health            Redis availability
+POST     /webhook/test                 synchronous RCA test (no Slack post)
+POST     /webhook                      Alertmanager webhook intake
+GET      /metrics                      Prometheus metrics scrape endpoint
 ```
 
 ---
@@ -222,7 +230,7 @@ routes:
 - Both can be combined in one rule
 - Falls back to `default_slack_webhook_url`, then `SLACK_WEBHOOK_URL` env var
 
-The file is **volume-mounted** — edit it and restart the container; no image rebuild needed.
+The file is **volume-mounted** in docker-compose for local dev. In Kubernetes the catalog ships in the container image at `/app/config/alert_catalog.yaml`. For zero-downtime routing updates, use the **Web UI** or `POST /api/config/routing` (Redis-backed hot-reload).
 
 ---
 
@@ -258,13 +266,14 @@ Consumer thread pool saturated by a spike in Kafka message volume at 11:27 UTC.
 
 ## Environment Variables
 
-Most of these can also be set from the Web UI (saved to `web_config.json`). Explicit env vars always win.
+Most settings can be set from the Web UI (saved to Redis + `config/web_config.json`). Precedence: **UI-stored value > env var > built-in default** (env vars seed Redis on first boot; UI changes win until cleared).
 
 | Variable | Default | Description |
 |---|---|---|
 | `AI_PROVIDER` | `openai` | `openai` \| `anthropic` \| `gemini` \| `bedrock` \| `fake` |
 | `OPENAI_API_KEY` | _(required)_ | API key for the selected provider |
 | `OPENAI_MODEL` | `gpt-4o` | Model name (interpreted per provider) |
+| `OPENAI_MODEL_INFO` | `gpt-4o-mini` | Model for `info`-severity alerts (OpenAI provider only) |
 | `SLACK_WEBHOOK_URL` | _(optional)_ | Fallback Slack webhook when no routing rule matches |
 | `ROUTING_CONFIG_PATH` | _(optional)_ | Path to `routing.yaml` inside the container |
 | `PROMETHEUS_URL` | cluster default | Prometheus base URL |
@@ -274,6 +283,12 @@ Most of these can also be set from the Web UI (saved to `web_config.json`). Expl
 | `ALLOWED_ALERTNAMES` | _(unset = all)_ | Regex filter — only process matching alert names |
 | `LLM_ENABLED` | `true` | Set `false` to use deterministic RCA fallback only |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL (`redis://redis:6379/0` in compose) |
+| `INVESTIGATION_MAX_WORKERS` | `8` | Max concurrent alert investigations |
+| `RUNBOOK_BASE_URL` | `https://wiki.dozee.internal/runbooks` | Base URL for catalog runbook links |
+| `ALERT_CATALOG_PATH` | `/app/config/alert_catalog.yaml` | Alert descriptions + runbooks |
+| `RECURRENCE_LOOKBACK_DAYS` | `7` | Window for recurring-alert detection |
+| `RECURRENCE_THRESHOLD` | `3` | Fires within window before flagging as recurring |
+| `LOG_LEVEL` | `INFO` | JSON log level (`DEBUG`, `INFO`, `WARNING`, …) |
 | `ADMIN_TOKEN` | _(unset = no auth)_ | Bearer token required by `/api/*` and the Web UI |
 | `CONFIG_STORE_PATH` | `/app/config/web_config.json` | Where Web UI config is persisted |
 | `NEXT_PUBLIC_API_URL` | `http://alert-agent:5001` | Backend URL used by the Web UI |
@@ -282,7 +297,7 @@ Most of these can also be set from the Web UI (saved to `web_config.json`). Expl
 
 ## Kubernetes Deployment
 
-Manifests: [`deploy/k8s/ai-alert-agent.yaml`](deploy/k8s/ai-alert-agent.yaml)
+Manifests: [`deploy/k8s/ai-alert-agent.yaml`](deploy/k8s/ai-alert-agent.yaml) — includes the agent Deployment, logs PVC, **Redis Deployment + PVC**, and ClusterIP services.
 
 ### Build and push image
 
@@ -335,7 +350,11 @@ Tools are exposed with prefixes (`k8s_`, `prom_`, `loki_`, `kafka_`) so the LLM 
 |---|---|
 | **Deduplication** | Same alert `fingerprint` is ignored for `DEDUP_TTL_SECONDS` (default 15 min) — stored in Redis, survives restarts |
 | **Allowlist filter** | `ALLOWED_ALERTNAMES` regex — drop alerts not matching |
-| **LLM fallback** | If OpenAI is unavailable or quota exceeded, falls back to a deterministic RCA using prefetched metrics |
+| **LLM fallback** | If OpenAI is unavailable, quota exceeded, or a transient error occurs (timeout, 5xx), falls back to a deterministic RCA using prefetched metrics |
+| **Alert storm protection** | Bounded `ThreadPoolExecutor` (`INVESTIGATION_MAX_WORKERS`, default 8) instead of unbounded threads |
+| **Recurring alerts** | Same fingerprint 3+ times in 7 days flagged in Slack header |
+| **Runbook links** | Catalog entries include runbook URLs in the Slack header |
+| **Cost optimization** | `info`-severity alerts use `gpt-4o-mini` (`OPENAI_MODEL_INFO`) |
 | **Body truncation** | Slack body capped at 3,800 chars with a truncation notice |
 | **Retry on Slack** | Up to 3 attempts with exponential backoff (2s → 4s → 8s) |
 | **k8s degraded mode** | If no kubeconfig is available (local dev), k8s tools return an error dict instead of crashing |
@@ -413,13 +432,8 @@ ai-agents/
 
 ## Future Improvements
 
-- **Alert queue** — bounded work queue instead of unbounded threads to handle alert storms gracefully
-- **Runbook links** — add `runbook_url` per alert in catalog; append to every RCA
 - **Multi-alert correlation** — group alerts firing on the same node/namespace into a single RCA
-- **Historical comparison** — compare current metric values against 7-day baselines to flag recurring issues
 - **Confidence score** — LLM rates certainty (low/medium/high); low-confidence RCAs flagged in Slack
-- **`/webhook/test` endpoint** — synchronous RCA without Slack post, for local testing and CI
-- **Structured JSON logs** — replace `print()` with structured logging for Loki/CloudWatch ingestion
 - **Grafana dashboard** — visualize `alerts_received`, `llm_investigations`, `slack_posts` with latency histograms
-- **Multi-tenant routing** — route different alert groups to different OpenAI keys or models (e.g. GPT-4o-mini for `info` severity)
 - **Helm chart** — package manifests with `routing.yaml` as a ConfigMap value for GitOps-native management
+- **Slack slash commands** — `/rca replay <alert>` and `/rca status` from Slack

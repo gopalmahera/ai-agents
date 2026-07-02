@@ -31,9 +31,11 @@ def _build_toolsets():
     ]
 
 
-def _model_string() -> str:
+def _model_string(severity: str | None = None) -> str:
     provider = getattr(_cfg, "AI_PROVIDER", "openai")
     model = getattr(_cfg, "OPENAI_MODEL", OPENAI_MODEL)
+    if provider == "openai" and (severity or "").lower() == "info":
+        model = getattr(_cfg, "OPENAI_MODEL_INFO", "gpt-4o-mini")
     if provider == "anthropic":
         return f"anthropic:{model}"
     if provider == "gemini":
@@ -45,9 +47,9 @@ def _model_string() -> str:
     return f"openai-chat:{model}"
 
 
-def create_agent() -> Agent:
+def create_agent(severity: str | None = None) -> Agent:
     return Agent(
-        _model_string(),
+        _model_string(severity),
         instructions=PROMPT_PATH.read_text(),
         output_type=str,
         toolsets=_build_toolsets(),
@@ -56,7 +58,8 @@ def create_agent() -> Agent:
 
 
 async def run_investigation(alert: dict, prefetched: dict | None = None) -> str:
-    agent = create_agent()
+    severity = alert.get("labels", {}).get("severity")
+    agent = create_agent(severity)
     context = build_alert_context(alert)
     alert_payload = alert_for_prompt(alert, context)
     prefetched_block = prefetched_to_prompt_block(prefetched)

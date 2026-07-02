@@ -1,0 +1,570 @@
+BlackboxHighLatency:
+  description: HTTP probe latency exceeded 1.5 seconds — target is slow to respond.
+  runbook: https://wiki.dozee.internal/runbooks/probe/blackbox-high-latency
+BlackboxTCPProbeFailed:
+  description: TCP probe to target failed — port is unreachable or connection refused.
+  runbook: https://wiki.dozee.internal/runbooks/probe/blackbox-tcp-failed
+BlackboxTargetDown:
+  description: HTTP probe to target failed — endpoint returned no response or probe_success=0.
+  runbook: https://wiki.dozee.internal/runbooks/probe/blackbox-target-down
+EC2HostClockNotSynchronising:
+  description: EC2 host NTP synchronisation is not active — clock accuracy degraded.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/clock-sync
+EC2HostClockSkew:
+  description: EC2 host system clock is skewed >50ms and diverging — NTP sync issue.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/clock-skew
+EC2HostConntrackLimit:
+  description: EC2 host connection tracking table is >80% full — new connections may
+    be dropped.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/conntrack
+EC2HostCpuStealNoisyNeighbor:
+  description: EC2 host CPU steal time is elevated — noisy neighbor on the hypervisor.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/cpu-steal
+EC2HostDiskWillFillIn24Hours:
+  description: EC2 host filesystem is predicted to run out of disk space within 24
+    hours.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/disk-space
+EC2HostDown:
+  description: Node-exporter scrape target is down — Prometheus cannot reach the EC2
+    instance.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/host-down
+EC2HostEdacCorrectableErrorsDetected:
+  description: EC2 host EDAC correctable memory errors detected — hardware may be
+    degrading.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/edac
+EC2HostEdacUncorrectableErrorsDetected:
+  description: EC2 host EDAC uncorrectable memory errors detected — hardware failure
+    imminent.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/edac
+EC2HostHighCPU:
+  description: EC2 host CPU utilization exceeded the configured threshold.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/high-cpu
+EC2HostHighCpuLoad:
+  description: EC2 host CPU utilization exceeded 80% for the configured duration.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/high-cpu
+EC2HostInodesWillFillIn24Hours:
+  description: EC2 host filesystem inodes predicted to run out within 24 hours.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/inodes
+EC2HostMemoryUnderMemoryPressure:
+  description: EC2 host is under memory pressure with a high rate of major page faults.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/memory-pressure
+EC2HostMemoryUnderUtilized:
+  description: EC2 host memory has been under 20% utilization for 1 week — possible
+    over-provisioning.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/memory-underutilized
+EC2HostNetworkInterfaceSaturated:
+  description: EC2 host network interface is >80% saturated (rx+tx approaching link
+    speed).
+  runbook: https://wiki.dozee.internal/runbooks/ec2/network-saturation
+EC2HostNodeOvertemperatureAlarm:
+  description: EC2 host critical over-temperature alarm triggered on a physical component.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/temperature
+EC2HostOutOfDiskSpace:
+  description: EC2 host filesystem has less than 10% disk space available.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/disk-space
+EC2HostOutOfInodes:
+  description: EC2 host filesystem has less than 10% inodes remaining.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/inodes
+EC2HostOutOfMemory:
+  description: EC2 host has less than 10% memory available.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/out-of-memory
+EC2HostPhysicalComponentTooHot:
+  description: EC2 host physical component temperature exceeded 75°C.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/temperature
+EC2HostRaidArrayGotInactive:
+  description: EC2 host RAID array became inactive due to disk failures — data at
+    risk.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/raid
+EC2HostRaidDiskFailure:
+  description: EC2 host RAID array has at least one failed disk.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/raid
+EC2HostSwapIsFillingUp:
+  description: EC2 host swap space is over 80% used — memory pressure is spilling
+    into swap.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/swap
+EC2HostSystemdServiceCrashed:
+  description: A systemd service on the EC2 host has entered the failed state.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/systemd-failed
+EC2HostUnusualDiskReadLatency:
+  description: EC2 host disk read operations are taking >100ms — storage may be degraded.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/disk-latency
+EC2HostUnusualDiskReadRate:
+  description: EC2 host disk read throughput is unusually high.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/disk-io
+EC2HostUnusualDiskWriteLatency:
+  description: EC2 host disk write operations are taking >100ms — storage may be degraded.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/disk-latency
+EC2HostUnusualDiskWriteRate:
+  description: EC2 host disk write throughput is unusually high.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/disk-io
+EC2HostUnusualNetworkThroughputIn:
+  description: EC2 host inbound network throughput is unusually high.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/network-throughput
+EC2HostUnusualNetworkThroughputOut:
+  description: EC2 host outbound network throughput is unusually high.
+  runbook: https://wiki.dozee.internal/runbooks/ec2/network-throughput
+NetworkKafkaHighBytesIn:
+  description: Kafka topic inbound throughput exceeded 1024 KB/s — producers are sending
+    a high volume of data.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/broker-throughput
+NetworkKafkaHighBytesOut:
+  description: Kafka topic outbound throughput exceeded 1024 KB/s — consumers or connectors
+    are under high read load.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/broker-throughput
+NetworkPodHighReceive:
+  description: Pod network receive rate exceeded the configured threshold.
+  runbook: https://wiki.dozee.internal/runbooks/kubernetes/pod-network-receive
+NetworkPodHighTransmit:
+  description: Pod network transmit rate exceeded the configured threshold.
+  runbook: https://wiki.dozee.internal/runbooks/kubernetes/pod-network-transmit
+PODCPULimitsUage>=90:
+  description: Pod container CPU usage reached ≥90% of its configured CPU limit for
+    5+ minutes.
+  runbook: https://wiki.dozee.internal/runbooks/kubernetes/pod-cpu-limits
+PODMemoryLimitsUage>=80:
+  description: Pod container memory usage reached ≥80% of its configured memory limit
+    for 5+ minutes.
+  runbook: https://wiki.dozee.internal/runbooks/kubernetes/pod-memory-limits
+PODMemoryLimitsUage>=90:
+  description: Pod container memory usage reached ≥90% of its configured memory limit
+    for 5+ minutes.
+  runbook: https://wiki.dozee.internal/runbooks/kubernetes/pod-memory-limits
+PodEvicted:
+  description: Pod was evicted from its node due to resource pressure (memory, disk,
+    or CPU).
+  runbook: https://wiki.dozee.internal/runbooks/kubernetes/pod-evicted
+PodOOMKilled:
+  description: Pod container was killed by the kernel OOM reaper after exceeding its
+    memory limit.
+  runbook: https://wiki.dozee.internal/runbooks/kubernetes/pod-oom
+PodRestart:
+  description: Kubernetes pod container restarted within the last 5 minutes.
+  runbook: https://wiki.dozee.internal/runbooks/kubernetes/pod-restart
+PodRestarting:
+  description: Kubernetes pod is in a restart loop — container keeps restarting.
+  runbook: https://wiki.dozee.internal/runbooks/kubernetes/pod-restart
+TLSCertificateExpiringSoon:
+  description: TLS certificate for the probed target expires within the configured
+    warning window.
+  runbook: https://wiki.dozee.internal/runbooks/probe/tls-certificate-expiring
+msk.kb.analytics.events > 3000:
+  description: MSK KB cluster consumer lag on topic analytics.events exceeded 3000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.analytics.events > 50000:
+  description: MSK KB cluster consumer lag on topic analytics.events exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.appointment.events > 3000:
+  description: MSK KB cluster consumer lag on topic appointment.events exceeded 3000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.appointment.events > 50000:
+  description: MSK KB cluster consumer lag on topic appointment.events exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.compute.events.processed > 3000:
+  description: MSK KB cluster consumer lag on topic compute.events.processed exceeded
+    3000 messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.compute.events.processed > 50000:
+  description: MSK KB cluster consumer lag on topic compute.events.processed exceeded
+    50000 messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.compute.events.raw > 3000:
+  description: MSK KB cluster consumer lag on topic compute.events.raw exceeded 3000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.compute.events.raw > 50000:
+  description: MSK KB cluster consumer lag on topic compute.events.raw exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.device.telemetry > 3000:
+  description: MSK KB cluster consumer lag on topic device.telemetry exceeded 3000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.device.telemetry > 50000:
+  description: MSK KB cluster consumer lag on topic device.telemetry exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.ecg.raw > 3000:
+  description: MSK KB cluster consumer lag on topic ecg.raw exceeded 3000 messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.ecg.raw > 50000:
+  description: MSK KB cluster consumer lag on topic ecg.raw exceeded 50000 messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.emr.integration > 3000:
+  description: MSK KB cluster consumer lag on topic emr.integration exceeded 3000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.emr.integration > 50000:
+  description: MSK KB cluster consumer lag on topic emr.integration exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.kbc.events.raw > 3000:
+  description: MSK KB cluster consumer lag on topic kbc.events.raw exceeded 3000 messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.kbc.events.raw > 50000:
+  description: MSK KB cluster consumer lag on topic kbc.events.raw exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.lab.results > 3000:
+  description: MSK KB cluster consumer lag on topic lab.results exceeded 3000 messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.lab.results > 50000:
+  description: MSK KB cluster consumer lag on topic lab.results exceeded 50000 messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.misc.ecgstream > 3000:
+  description: MSK KB cluster consumer lag on topic misc.ecgstream exceeded 3000 messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.misc.ecgstream > 50000:
+  description: MSK KB cluster consumer lag on topic misc.ecgstream exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.nomessage.analytics.events = 0:
+  description: No messages observed on MSK KB topic analytics.events within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kb.nomessage.appointment.events = 0:
+  description: No messages observed on MSK KB topic appointment.events within the
+    expected window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kb.nomessage.compute.events.processed = 0:
+  description: No messages observed on MSK KB topic compute.events.processed within
+    the expected window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kb.nomessage.compute.events.raw = 0:
+  description: No messages observed on MSK KB topic compute.events.raw within the
+    expected window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kb.nomessage.device.telemetry = 0:
+  description: No messages observed on MSK KB topic device.telemetry within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kb.nomessage.ecg.raw = 0:
+  description: No messages observed on MSK KB topic ecg.raw within the expected window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kb.nomessage.emr.integration = 0:
+  description: No messages observed on MSK KB topic emr.integration within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kb.nomessage.kbc.events.raw = 0:
+  description: No messages observed on MSK KB topic kbc.events.raw within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kb.nomessage.lab.results = 0:
+  description: No messages observed on MSK KB topic lab.results within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kb.nomessage.misc.ecgstream = 0:
+  description: No messages observed on MSK KB topic misc.ecgstream within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kb.nomessage.notification.stream = 0:
+  description: No messages observed on MSK KB topic notification.stream within the
+    expected window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kb.nomessage.patient.ecg = 0:
+  description: No messages observed on MSK KB topic patient.ecg within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kb.nomessage.patient.vitals = 0:
+  description: No messages observed on MSK KB topic patient.vitals within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kb.nomessage.platform.metrics = 0:
+  description: No messages observed on MSK KB topic platform.metrics within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kb.nomessage.realtime.dashboard = 0:
+  description: No messages observed on MSK KB topic realtime.dashboard within the
+    expected window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kb.nomessage.user.events = 0:
+  description: No messages observed on MSK KB topic user.events within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kb.nomessage.vitals.raw = 0:
+  description: No messages observed on MSK KB topic vitals.raw within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kb.nomessage.warehouse.ingest = 0:
+  description: No messages observed on MSK KB topic warehouse.ingest within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kb.nomessage.wss.vitals.kims = 0:
+  description: No messages observed on MSK KB topic wss.vitals.kims within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kb.nomessage.wss.vitalsstream = 0:
+  description: No messages observed on MSK KB topic wss.vitalsstream within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kb.notification.stream > 3000:
+  description: MSK KB cluster consumer lag on topic notification.stream exceeded 3000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.notification.stream > 50000:
+  description: MSK KB cluster consumer lag on topic notification.stream exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.patient.ecg > 3000:
+  description: MSK KB cluster consumer lag on topic patient.ecg exceeded 3000 messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.patient.ecg > 50000:
+  description: MSK KB cluster consumer lag on topic patient.ecg exceeded 50000 messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.patient.vitals > 3000:
+  description: MSK KB cluster consumer lag on topic patient.vitals exceeded 3000 messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.patient.vitals > 50000:
+  description: MSK KB cluster consumer lag on topic patient.vitals exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.platform.metrics > 3000:
+  description: MSK KB cluster consumer lag on topic platform.metrics exceeded 3000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.platform.metrics > 50000:
+  description: MSK KB cluster consumer lag on topic platform.metrics exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.realtime.dashboard > 3000:
+  description: MSK KB cluster consumer lag on topic realtime.dashboard exceeded 3000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.realtime.dashboard > 50000:
+  description: MSK KB cluster consumer lag on topic realtime.dashboard exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.user.events > 3000:
+  description: MSK KB cluster consumer lag on topic user.events exceeded 3000 messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.user.events > 50000:
+  description: MSK KB cluster consumer lag on topic user.events exceeded 50000 messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.vitals.raw > 3000:
+  description: MSK KB cluster consumer lag on topic vitals.raw exceeded 3000 messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.vitals.raw > 50000:
+  description: MSK KB cluster consumer lag on topic vitals.raw exceeded 50000 messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.warehouse.ingest > 3000:
+  description: MSK KB cluster consumer lag on topic warehouse.ingest exceeded 3000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.warehouse.ingest > 50000:
+  description: MSK KB cluster consumer lag on topic warehouse.ingest exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.wss.vitals.kims > 3000:
+  description: MSK KB cluster consumer lag on topic wss.vitals.kims exceeded 3000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.wss.vitals.kims > 50000:
+  description: MSK KB cluster consumer lag on topic wss.vitals.kims exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.wss.vitalsstream > 3000:
+  description: MSK KB cluster consumer lag on topic wss.vitalsstream exceeded 3000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kb.wss.vitalsstream > 50000:
+  description: MSK KB cluster consumer lag on topic wss.vitalsstream exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kbc.analytics.events > 50000:
+  description: MSK KBC cluster consumer lag on topic analytics.events exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kbc.appointment.events > 50000:
+  description: MSK KBC cluster consumer lag on topic appointment.events exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kbc.compute.events.processed > 50000:
+  description: MSK KBC cluster consumer lag on topic compute.events.processed exceeded
+    50000 messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kbc.compute.events.raw > 50000:
+  description: MSK KBC cluster consumer lag on topic compute.events.raw exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kbc.device.telemetry > 50000:
+  description: MSK KBC cluster consumer lag on topic device.telemetry exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kbc.ecg.raw > 50000:
+  description: MSK KBC cluster consumer lag on topic ecg.raw exceeded 50000 messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kbc.emr.integration > 50000:
+  description: MSK KBC cluster consumer lag on topic emr.integration exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kbc.kbc.events.raw > 50000:
+  description: MSK KBC cluster consumer lag on topic kbc.events.raw exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kbc.lab.results > 50000:
+  description: MSK KBC cluster consumer lag on topic lab.results exceeded 50000 messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kbc.misc.ecgstream > 50000:
+  description: MSK KBC cluster consumer lag on topic misc.ecgstream exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kbc.nomessage.analytics.events = 0:
+  description: No messages observed on MSK KBC topic analytics.events within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kbc.nomessage.appointment.events = 0:
+  description: No messages observed on MSK KBC topic appointment.events within the
+    expected window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kbc.nomessage.compute.events.processed = 0:
+  description: No messages observed on MSK KBC topic compute.events.processed within
+    the expected window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kbc.nomessage.compute.events.raw = 0:
+  description: No messages observed on MSK KBC topic compute.events.raw within the
+    expected window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kbc.nomessage.device.telemetry = 0:
+  description: No messages observed on MSK KBC topic device.telemetry within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kbc.nomessage.ecg.raw = 0:
+  description: No messages observed on MSK KBC topic ecg.raw within the expected window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kbc.nomessage.emr.integration = 0:
+  description: No messages observed on MSK KBC topic emr.integration within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kbc.nomessage.kbc.events.raw = 0:
+  description: No messages observed on MSK KBC topic kbc.events.raw within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kbc.nomessage.lab.results = 0:
+  description: No messages observed on MSK KBC topic lab.results within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kbc.nomessage.misc.ecgstream = 0:
+  description: No messages observed on MSK KBC topic misc.ecgstream within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kbc.nomessage.notification.stream = 0:
+  description: No messages observed on MSK KBC topic notification.stream within the
+    expected window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kbc.nomessage.patient.ecg = 0:
+  description: No messages observed on MSK KBC topic patient.ecg within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kbc.nomessage.patient.vitals = 0:
+  description: No messages observed on MSK KBC topic patient.vitals within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kbc.nomessage.platform.metrics = 0:
+  description: No messages observed on MSK KBC topic platform.metrics within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kbc.nomessage.realtime.dashboard = 0:
+  description: No messages observed on MSK KBC topic realtime.dashboard within the
+    expected window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kbc.nomessage.user.events = 0:
+  description: No messages observed on MSK KBC topic user.events within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kbc.nomessage.vitals.raw = 0:
+  description: No messages observed on MSK KBC topic vitals.raw within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kbc.nomessage.warehouse.ingest = 0:
+  description: No messages observed on MSK KBC topic warehouse.ingest within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kbc.nomessage.wss.vitals.kims = 0:
+  description: No messages observed on MSK KBC topic wss.vitals.kims within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kbc.nomessage.wss.vitalsstream = 0:
+  description: No messages observed on MSK KBC topic wss.vitalsstream within the expected
+    window.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-no-messages
+msk.kbc.notification.stream > 50000:
+  description: MSK KBC cluster consumer lag on topic notification.stream exceeded
+    50000 messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kbc.patient.ecg > 50000:
+  description: MSK KBC cluster consumer lag on topic patient.ecg exceeded 50000 messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kbc.patient.vitals > 50000:
+  description: MSK KBC cluster consumer lag on topic patient.vitals exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kbc.platform.metrics > 50000:
+  description: MSK KBC cluster consumer lag on topic platform.metrics exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kbc.realtime.dashboard > 50000:
+  description: MSK KBC cluster consumer lag on topic realtime.dashboard exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kbc.user.events > 50000:
+  description: MSK KBC cluster consumer lag on topic user.events exceeded 50000 messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kbc.vitals.raw > 50000:
+  description: MSK KBC cluster consumer lag on topic vitals.raw exceeded 50000 messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kbc.warehouse.ingest > 50000:
+  description: MSK KBC cluster consumer lag on topic warehouse.ingest exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kbc.wss.vitals.kims > 50000:
+  description: MSK KBC cluster consumer lag on topic wss.vitals.kims exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+msk.kbc.wss.vitalsstream > 50000:
+  description: MSK KBC cluster consumer lag on topic wss.vitalsstream exceeded 50000
+    messages.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+pod.anomaly.cpu.1d:
+  description: Pod CPU usage is statistically anomalous (>2σ) compared to its 1-day
+    baseline.
+  runbook: https://wiki.dozee.internal/runbooks/kubernetes/pod-anomaly-cpu
+pod.anomaly.cpu.1h:
+  description: Pod CPU usage is statistically anomalous (>2σ) compared to its 1-hour
+    baseline.
+  runbook: https://wiki.dozee.internal/runbooks/kubernetes/pod-anomaly-cpu
+pod.anomaly.memory.1d:
+  description: Pod memory usage is statistically anomalous (>2σ) compared to its 1-day
+    baseline.
+  runbook: https://wiki.dozee.internal/runbooks/kubernetes/pod-anomaly-memory
+pod.anomaly.memory.1h:
+  description: Pod memory usage is statistically anomalous (>2σ) compared to its 1-hour
+    baseline.
+  runbook: https://wiki.dozee.internal/runbooks/kubernetes/pod-anomaly-memory
+pod.anomaly.network.receive.1d:
+  description: Pod network receive traffic is anomalous (>2σ) compared to its 1-day
+    baseline.
+  runbook: https://wiki.dozee.internal/runbooks/kubernetes/pod-anomaly-network
+pod.anomaly.network.receive.1h:
+  description: Pod network receive traffic is anomalous (>2σ) compared to its 1-hour
+    baseline.
+  runbook: https://wiki.dozee.internal/runbooks/kubernetes/pod-anomaly-network
+pod.anomaly.network.transmit.1d:
+  description: Pod network transmit traffic is anomalous (>2σ) compared to its 1-day
+    baseline.
+  runbook: https://wiki.dozee.internal/runbooks/kubernetes/pod-anomaly-network
+pod.anomaly.network.transmit.1h:
+  description: Pod network transmit traffic is anomalous (>2σ) compared to its 1-hour
+    baseline.
+  runbook: https://wiki.dozee.internal/runbooks/kubernetes/pod-anomaly-network
+pod.restart.ecgstream:
+  description: MSK consumer lag on group.misc.ecgstream exceeded threshold.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+pod.restart.vitals.kims:
+  description: MSK consumer lag on group.wss.vitals.kims exceeded threshold.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag
+pod.restart.vitalsstream:
+  description: MSK consumer lag on group.wss.vitalsstream exceeded threshold.
+  runbook: https://wiki.dozee.internal/runbooks/kafka/msk-consumer-lag

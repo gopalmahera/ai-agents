@@ -74,11 +74,18 @@ _STREAM_KEY = "stream:alerts"
 _STREAM_MAXLEN = 50_000  # keep last 50k events (~months of data for most setups)
 
 
-def stream_add(alertname: str, outcome: str, namespace: str = "", extra: dict | None = None) -> None:
+def stream_add(
+    alertname: str,
+    outcome: str,
+    namespace: str = "",
+    fingerprint: str = "",
+    extra: dict | None = None,
+) -> None:
     fields = {
         "alertname": alertname,
         "outcome": outcome,
         "namespace": namespace,
+        "fingerprint": fingerprint,
         **(extra or {}),
     }
     get().xadd(_STREAM_KEY, fields, maxlen=_STREAM_MAXLEN, approximate=True)
@@ -92,6 +99,21 @@ def stream_range(start: str = "-", end: str = "+", count: int = 10_000) -> list[
         ts_ms = int(entry_id.split("-")[0])
         result.append({"id": entry_id, "ts_ms": ts_ms, **fields})
     return result
+
+
+def fingerprint_count_days(fingerprint: str, days: int = 7) -> int:
+    """Count accepted alert events for a fingerprint within the last N days."""
+    if not fingerprint:
+        return 0
+    from datetime import datetime, timedelta, timezone
+
+    since_ms = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp() * 1000)
+    entries = stream_range(start=f"{since_ms}-0", count=50_000)
+    return sum(
+        1
+        for entry in entries
+        if entry.get("fingerprint") == fingerprint and entry.get("outcome") == "accepted"
+    )
 
 
 def is_available() -> bool:
