@@ -56,7 +56,7 @@ export KAFKA_MCP_URL="${KAFKA_MCP_URL:-http://127.0.0.1:8004/mcp}"
 
 cd /app/alert-agent
 exec gunicorn \
-  --bind 0.0.0.0:5001 \
+  --bind "0.0.0.0:${AGENT_PORT:-8080}" \
   --workers 1 \
   --threads 8 \
   --timeout "${GUNICORN_TIMEOUT:-300}" \

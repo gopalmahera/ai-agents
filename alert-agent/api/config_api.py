@@ -1,5 +1,4 @@
 """API endpoints for reading and writing agent configuration."""
-import re
 
 import requests
 import yaml
@@ -42,23 +41,57 @@ def post_config():
     return jsonify(result)
 
 
+def _probe_mcp_server(url: str) -> dict:
+    """Check that an internal MCP HTTP server is listening."""
+    mcp_url = url if url.rstrip("/").endswith("/mcp") else f"{url.rstrip('/')}/mcp"
+    try:
+        # FastMCP streamable-http serves /mcp only (no /health). A 406 without
+        # MCP Accept headers still proves the process is up.
+        resp = requests.get(mcp_url, timeout=3, stream=True)
+        resp.close()
+        status = "healthy" if resp.status_code < 500 else "error"
+        return {"url": url, "status": status, "code": resp.status_code}
+    except Exception as exc:
+        return {"url": url, "status": "unreachable", "error": str(exc)}
+
+
 @bp.get("/mcp/health")
 @require_auth
 def mcp_health():
     results = {}
     for key, url_fn in _MCP_SERVERS.items():
-        url = url_fn()
-        base = re.sub(r"/mcp$", "", url)
-        try:
-            resp = requests.get(f"{base}/health", timeout=3)
-            results[key] = {
-                "url": url,
-                "status": "healthy" if resp.status_code < 400 else "error",
-                "code": resp.status_code,
-            }
-        except Exception as exc:
-            results[key] = {"url": url, "status": "unreachable", "error": str(exc)}
+        results[key] = _probe_mcp_server(url_fn())
     return jsonify(results)
+
+
+_DIRECT_SERVICE_PROBES: dict[str, str | tuple[str, ...]] = {
+    "PROMETHEUS_URL": "/-/healthy",
+    # Bare Loki exposes /ready; gateway/nginx setups use a /loki prefix.
+    "LOKI_URL": ("/ready", "/loki/ready", "/loki/api/v1/status/buildinfo"),
+}
+
+
+def _probe_http_service(url: str, probes: str | tuple[str, ...]) -> dict:
+    if isinstance(probes, str):
+        probes = (probes,)
+    last_code: int | None = None
+    last_error: str | None = None
+    for probe in probes:
+        try:
+            resp = requests.get(f"{url.rstrip('/')}{probe}", timeout=3)
+            if resp.status_code < 400:
+                return {
+                    "url": url,
+                    "status": "healthy",
+                    "code": resp.status_code,
+                    "probe": probe,
+                }
+            last_code = resp.status_code
+        except Exception as exc:
+            last_error = str(exc)
+    if last_code is not None:
+        return {"url": url, "status": "error", "code": last_code}
+    return {"url": url, "status": "unreachable", "error": last_error or "unknown"}
 
 
 @bp.get("/services/health")
@@ -66,25 +99,13 @@ def mcp_health():
 def services_health():
     """Health check for direct service endpoints (Prometheus, Loki)."""
     results = {}
-    _PROBES = {
-        "PROMETHEUS_URL": "/-/healthy",
-        "LOKI_URL": "/ready",
-    }
     for key, url_fn in _DIRECT_SERVICES.items():
         url = url_fn()
         if not url:
             results[key] = {"url": "", "status": "not_configured"}
             continue
-        probe = _PROBES.get(key, "/")
-        try:
-            resp = requests.get(f"{url.rstrip('/')}{probe}", timeout=3)
-            results[key] = {
-                "url": url,
-                "status": "healthy" if resp.status_code < 400 else "error",
-                "code": resp.status_code,
-            }
-        except Exception as exc:
-            results[key] = {"url": url, "status": "unreachable", "error": str(exc)}
+        probes = _DIRECT_SERVICE_PROBES.get(key, ("/",))
+        results[key] = _probe_http_service(url, probes)
     return jsonify(results)
 
 

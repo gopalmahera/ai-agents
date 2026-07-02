@@ -158,7 +158,7 @@ spec:
           image: 414448255958.dkr.ecr.ap-south-1.amazonaws.com/prometheus/ai-alert-agent:1.0.1
           imagePullPolicy: Always
           ports:
-            - containerPort: 5001
+            - containerPort: 8080
               name: http
           env:
             - name: OPENAI_API_KEY
@@ -187,6 +187,8 @@ spec:
               value: redis://ai-alert-agent-redis.monitoring.svc.cluster.local:6379/0
             - name: INVESTIGATION_MAX_WORKERS
               value: '8'
+            - name: AGENT_PORT
+              value: '8080'
             - name: RUNBOOK_BASE_URL
               value: https://wiki.dozee.internal/runbooks
           livenessProbe:
@@ -225,7 +227,7 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-    - port: 5001
+    - port: 8080
       targetPort: http
       protocol: TCP
   selector:

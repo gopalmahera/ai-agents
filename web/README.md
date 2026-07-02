@@ -25,15 +25,15 @@ Next.js 14 dashboard for configuring and monitoring the alert agent. Talks to th
 ## Local Development
 
 ```bash
+cp .env.local.example .env.local   # API_URL=http://localhost:8080
 npm install
 npm run dev          # http://localhost:3000
 ```
 
-Environment variables (set at build time — `NEXT_PUBLIC_*` are inlined):
-
 | Variable | Default | Description |
 |---|---|---|
-| `NEXT_PUBLIC_API_URL` | `http://localhost:5001` | Flask backend base URL |
+| `API_URL` | `http://localhost:8080` | Flask backend for Next.js `/api/*` proxy (see `next.config.mjs`) |
+| `NEXT_PUBLIC_API_URL` | _(empty)_ | Leave empty to use the proxy; set `http://localhost:8080` to call Flask directly from the browser |
 | `NEXT_PUBLIC_ADMIN_TOKEN` | _(empty)_ | Bearer token sent to `/api/*` (must match backend `ADMIN_TOKEN`) |
 
 ## Docker

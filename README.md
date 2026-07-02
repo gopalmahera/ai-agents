@@ -6,7 +6,7 @@ The stack has three services (via `docker compose`):
 
 | Service | Port | Purpose |
 |---|---|---|
-| `alert-agent` | 5001 | Flask webhook, LLM agent, four embedded MCP tool servers |
+| `alert-agent` | 8080 | Flask webhook, LLM agent, four embedded MCP tool servers |
 | `web` | 3000 | Next.js config dashboard (AI provider, MCP URLs, routing, logs, reports) |
 | `redis` | 6379 | Persistent store — dedup cache, counters, alert event stream |
 
@@ -90,20 +90,20 @@ docker compose up --build
 
 ```bash
 # Health check
-curl http://localhost:5001/health
+curl http://localhost:8080/health
 
 # Send a test alert (async — posts to Slack)
-curl -X POST http://localhost:5001/webhook \
+curl -X POST http://localhost:8080/webhook \
   -H "Content-Type: application/json" \
   -d @sample/network-pod-high-transmit-alert.json
 
 # Test RCA synchronously (no Slack post)
-curl -X POST http://localhost:5001/webhook/test \
+curl -X POST http://localhost:8080/webhook/test \
   -H "Content-Type: application/json" \
   -d @sample/pod-cpu-limits-usage-alert.json
 
 # Prometheus metrics
-curl http://localhost:5001/metrics
+curl http://localhost:8080/metrics
 ```
 
 ### 5. Open the Web UI
@@ -291,7 +291,8 @@ Most settings can be set from the Web UI (saved to Redis + `config/web_config.js
 | `LOG_LEVEL` | `INFO` | JSON log level (`DEBUG`, `INFO`, `WARNING`, …) |
 | `ADMIN_TOKEN` | _(unset = no auth)_ | Bearer token required by `/api/*` and the Web UI |
 | `CONFIG_STORE_PATH` | `/app/config/web_config.json` | Where Web UI config is persisted |
-| `NEXT_PUBLIC_API_URL` | `http://alert-agent:5001` | Backend URL used by the Web UI |
+| `NEXT_PUBLIC_API_URL` | _(empty)_ | Leave empty to proxy `/api/*` via Next.js; set `http://localhost:8080` for direct backend access |
+| `API_URL` | `http://localhost:8080` | Backend URL for Next.js rewrites (set `http://alert-agent:8080` in Docker build) |
 
 ---
 

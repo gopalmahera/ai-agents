@@ -3,11 +3,11 @@ services:
     image: redis:7-alpine
     command: redis-server --save 60 1 --appendonly yes
     ports:
-      - "6379:6379"
+      - '6379:6379'
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -19,7 +19,7 @@ services:
         - linux/amd64
     platform: linux/amd64
     ports:
-      - "5001:5001"
+      - '8080:8080'
     env_file:
       - .env
     volumes:
@@ -34,21 +34,23 @@ services:
       CONFIG_STORE_PATH: /app/config/web_config.json
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
       REDIS_URL: redis://redis:6379/0
+      AGENT_PORT: "8080"
     depends_on:
       redis:
         condition: service_healthy
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - 'host.docker.internal:host-gateway'
 
   web:
     build:
       context: ./web
       dockerfile: Dockerfile
+      args:
+        API_URL: http://alert-agent:8080
+        NEXT_PUBLIC_API_URL: ""
+        NEXT_PUBLIC_ADMIN_TOKEN: ${ADMIN_TOKEN:-}
     ports:
-      - "3000:3000"
-    environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://alert-agent:5001}
-      NEXT_PUBLIC_ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      - '3000:3000'
     depends_on:
       - alert-agent
 

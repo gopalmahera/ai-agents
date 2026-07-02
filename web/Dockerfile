@@ -7,8 +7,10 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-ARG NEXT_PUBLIC_API_URL
-ARG NEXT_PUBLIC_ADMIN_TOKEN
+ARG API_URL=http://127.0.0.1:8080
+ARG NEXT_PUBLIC_API_URL=
+ARG NEXT_PUBLIC_ADMIN_TOKEN=
+ENV API_URL=$API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_ADMIN_TOKEN=$NEXT_PUBLIC_ADMIN_TOKEN
 # Ensure public dir exists (Next.js standalone requires it even if empty)

@@ -1,3 +1,4 @@
+from config import AGENT_PORT
 from controllers.webhook_controller import create_app
 from api.config_api import bp as config_bp
 from api.metrics_api import bp as metrics_bp
@@ -16,4 +17,4 @@ app.register_blueprint(logs_bp)
 config_sync.start()
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5001)
+    app.run(host="0.0.0.0", port=AGENT_PORT)

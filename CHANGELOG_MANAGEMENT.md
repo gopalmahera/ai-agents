@@ -29,7 +29,7 @@ The **AI Alert Agent** automates this investigation. It receives the alert, quer
 | **Slack Reporter** | Posts formatted RCA with color-coded severity to the right channel |
 | **Web Config Dashboard** | Next.js UI (port 3000) — config editor, routing, logs browser, reports, MCP/Redis health |
 
-Locally, three services run via `docker compose`: **alert-agent** (5001), **redis** (6379), and **web** (3000). The alert-agent container embeds four MCP servers and is backed by Redis for dedup, counters, and shared config.
+Locally, three services run via `docker compose`: **alert-agent** (8080), **redis** (6379), and **web** (3000). The alert-agent container embeds four MCP servers and is backed by Redis for dedup, counters, and shared config.
 
 ---
 
@@ -187,7 +187,7 @@ Redis also stores the same counters for the Web UI dashboard and HA replicas.
 
 | Environment | Status |
 |---|---|
-| Local (docker-compose) | Running — alert-agent (5001) + redis (6379) + web (3000) |
+| Local (docker-compose) | Running — alert-agent (8080) + redis (6379) + web (3000) |
 | Kubernetes (dozee-dev) | Manifests ready |
 | Kubernetes (dozee-pro) | Manifests ready |
 

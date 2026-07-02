@@ -34,6 +34,7 @@ RECURRENCE_THRESHOLD = int(os.getenv("RECURRENCE_THRESHOLD", "3"))
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 CONFIG_STORE_PATH = os.getenv("CONFIG_STORE_PATH", "/app/config/web_config.json")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+AGENT_PORT = int(os.getenv("AGENT_PORT", "8080"))
 
 _allowed_alertname_pattern: re.Pattern[str] | None = None
 if ALLOWED_ALERTNAMES:

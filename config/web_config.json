@@ -1,0 +1,4 @@
+{
+  "PROMETHEUS_URL": "http://prometheus-sit.dozee.int",
+  "LOKI_URL": "http://loki-sit.dozee.int"
+}
