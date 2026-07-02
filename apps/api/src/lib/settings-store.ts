@@ -231,12 +231,7 @@ export async function getEnvironment(name: string): Promise<Environment | null> 
   return doc ? (stripMongo(doc as Record<string, unknown>) as unknown as Environment) : null;
 }
 
-function validateSingleEnvironment(env: Environment): string[] {
-  const editable = [{ id: "x", name: env.name, prometheus: env.prometheus ?? "", loki: env.loki ?? "", kubernetes: env.kubernetes ?? "", aws: env.aws ?? "" }];
-  return Object.values(validateEnvironments(editable, {}).envs);
-}
-
-async function validateEnvironmentRefs(env: Environment): Promise<string[]> {
+async function validateEnvironment(env: Environment): Promise<string[]> {
   const byType = await endpointsByType();
   const editable = [{ id: "x", name: env.name, prometheus: env.prometheus ?? "", loki: env.loki ?? "", kubernetes: env.kubernetes ?? "", aws: env.aws ?? "" }];
   const v = validateEnvironments(editable, byType);
@@ -245,8 +240,7 @@ async function validateEnvironmentRefs(env: Environment): Promise<string[]> {
 
 export async function createEnvironment(env: Environment): Promise<Environment> {
   const name = env.name.trim();
-  let errors = validateSingleEnvironment({ ...env, name });
-  if (!errors.length) errors = await validateEnvironmentRefs({ ...env, name });
+  const errors = await validateEnvironment({ ...env, name });
   if (errors.length) throw new ValidationError(errors);
   const db = await getDb();
   if (await db.collection("environments").findOne({ name })) {
@@ -264,8 +258,7 @@ export async function updateEnvironment(name: string, env: Environment): Promise
     throw new NotFoundError(`Environment "${name}" not found`);
   }
   const newName = env.name.trim();
-  let errors = validateSingleEnvironment({ ...env, name: newName });
-  if (!errors.length) errors = await validateEnvironmentRefs({ ...env, name: newName });
+  const errors = await validateEnvironment({ ...env, name: newName });
   if (errors.length) throw new ValidationError(errors);
   if (newName !== name && (await db.collection("environments").findOne({ name: newName }))) {
     throw new ValidationError([`Environment "${newName}" already exists.`]);
