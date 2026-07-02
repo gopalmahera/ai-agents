@@ -1,0 +1,91 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+
+:root {
+  --kb-secondary: #171717;
+  --kb-secondary-dark: #52555e;
+  --kb-secondary-light: #787990;
+  --kb-secondary-lighter: #dbe0e9;
+}
+
+.dark {
+  color-scheme: dark;
+  --kb-secondary: #f1f5f9;
+  --kb-secondary-dark: #cbd5e1;
+  --kb-secondary-light: #cbd5e1;
+  --kb-secondary-lighter: #334155;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: #f8fafc;
+  color: #171717;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.dark body {
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+h1, h2, h3, h4 {
+  font-family: 'Poppins', ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer utilities {
+  .dark .bg-slate-50  { background-color: rgb(30 41 59 / 0.6); }
+  .dark .bg-slate-100 { background-color: #334155; }
+  .dark .border-slate-100 { border-color: #334155; }
+  .dark .text-slate-900 { color: #f1f5f9; }
+  .dark .text-slate-800 { color: #e2e8f0; }
+  .dark .text-slate-700 { color: #cbd5e1; }
+  .dark .text-slate-600 { color: #94a3b8; }
+  .dark .text-slate-500 { color: #94a3b8; }
+  .dark .text-indigo-600 { color: #818cf8; }
+}
+
+@layer components {
+  .card {
+    @apply bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm p-5;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-colors;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-dark active:bg-primary-darker transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors disabled:opacity-50;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center gap-2 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50;
+  }
+
+  .badge-green {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400;
+  }
+
+  .badge-red {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-400;
+  }
+
+  .badge-gray {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400;
+  }
+
+  .badge-yellow {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-400;
+  }
+}

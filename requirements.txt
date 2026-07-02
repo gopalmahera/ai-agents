@@ -8,3 +8,4 @@ mcp
 kubernetes
 prometheus_client
 pyyaml
+redis

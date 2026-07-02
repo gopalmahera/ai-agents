@@ -2,7 +2,13 @@
 
 AI-powered Alertmanager webhook that automatically investigates firing alerts using live data from Kubernetes, Prometheus, Loki, and Kafka — then posts a structured Root Cause Analysis (RCA) to the right Slack channel.
 
-Everything runs in a **single container**: Flask webhook, OpenAI GPT-4o agent, and four MCP tool servers.
+The stack has three services (via `docker compose`):
+
+| Service | Port | Purpose |
+|---|---|---|
+| `alert-agent` | 5001 | Flask webhook, LLM agent, four embedded MCP tool servers |
+| `web` | 3000 | Next.js config dashboard (AI provider, MCP URLs, routing, logs, reports) |
+| `redis` | 6379 | Persistent store — dedup cache, counters, alert event stream |
 
 ---
 
