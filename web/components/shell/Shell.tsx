@@ -11,7 +11,7 @@ const NAV = [
     label: "Config",
     children: [
       { href: "/config/ai", label: "AI Provider" },
-      { href: "/config/mcp", label: "MCP Services" },
+      { href: "/config/mcp", label: "Service Endpoints" },
       { href: "/config/storage", label: "Storage & Behavior" },
     ],
   },

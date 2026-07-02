@@ -6,8 +6,14 @@ dedup:<fingerprint>          STRING  "1"   TTL = DEDUP_TTL_SECONDS
 counter:<name>               STRING  int   persistent counters (INCR)
 alertname:counts             HASH    alertname → received count
 stream:alerts                STREAM  one entry per accepted alert event
+config:store                 HASH    key → JSON value (shared runtime config)
+config:version               STRING  int, bumped on every config change
+config:routing_yaml          STRING  routing rules as YAML text
+config:events                PUBSUB  {"kind": "config"|"routing", "version": N}
 """
+import json
 import os
+
 import redis
 
 _REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -94,3 +100,51 @@ def is_available() -> bool:
         return True
     except Exception:
         return False
+
+
+# ── Shared config store (synced across replicas) ──────────────────────────────
+
+_CONFIG_HASH = "config:store"
+_CONFIG_VERSION_KEY = "config:version"
+_ROUTING_YAML_KEY = "config:routing_yaml"
+EVENTS_CHANNEL = "config:events"
+
+
+def config_load() -> dict[str, str]:
+    """Raw stored config values (JSON-encoded strings)."""
+    return get().hgetall(_CONFIG_HASH)
+
+
+def config_save(values: dict[str, str]) -> None:
+    if values:
+        get().hset(_CONFIG_HASH, mapping=values)
+
+
+def config_is_empty() -> bool:
+    return get().hlen(_CONFIG_HASH) == 0
+
+
+def config_version() -> int:
+    val = get().get(_CONFIG_VERSION_KEY)
+    return int(val) if val else 0
+
+
+def publish_config_event(kind: str) -> int:
+    """Bump the shared version and notify all replicas. Returns the new version."""
+    version = get().incr(_CONFIG_VERSION_KEY)
+    get().publish(EVENTS_CHANNEL, json.dumps({"kind": kind, "version": version}))
+    return version
+
+
+def subscribe_events():
+    pubsub = get().pubsub(ignore_subscribe_messages=True)
+    pubsub.subscribe(EVENTS_CHANNEL)
+    return pubsub
+
+
+def routing_yaml_load() -> str | None:
+    return get().get(_ROUTING_YAML_KEY)
+
+
+def routing_yaml_save(yaml_text: str) -> None:
+    get().set(_ROUTING_YAML_KEY, yaml_text)

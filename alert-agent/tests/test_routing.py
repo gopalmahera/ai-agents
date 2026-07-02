@@ -1,6 +1,6 @@
-import os
 import tempfile
 import unittest
+from unittest import mock
 
 import yaml
 
@@ -16,12 +16,19 @@ def _write_config(data: dict) -> str:
 
 class TestRouting(unittest.TestCase):
     def setUp(self):
-        routing._config = None  # reset cache between tests
+        routing.reset_cache()
+        self.addCleanup(routing.reset_cache)
+        # No Redis in unit tests — force fallback to the file path
+        patcher = mock.patch.object(routing._redis, "routing_yaml_load", return_value=None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _load(self, cfg: dict) -> None:
         path = _write_config(cfg)
-        routing._ROUTING_CONFIG_PATH = path
-        routing._config = None
+        patcher = mock.patch.object(routing._cfg, "ROUTING_CONFIG_PATH", path, create=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        routing.reset_cache()
 
     def test_exact_match_wins(self):
         self._load({
@@ -72,10 +79,9 @@ class TestRouting(unittest.TestCase):
         self.assertEqual(routing.resolve_webhook_url({"severity": "critical"}), "https://first")
 
     def test_no_config_falls_back_to_env(self):
-        routing._ROUTING_CONFIG_PATH = ""
-        routing._config = None
-        import unittest.mock as mock
-        with mock.patch("services.notification.routing.SLACK_WEBHOOK_URL", "https://env-fallback"):
+        with mock.patch.object(routing._cfg, "ROUTING_CONFIG_PATH", "", create=True), \
+             mock.patch.object(routing._cfg, "SLACK_WEBHOOK_URL", "https://env-fallback"):
+            routing.reset_cache()
             self.assertEqual(routing.resolve_webhook_url({"severity": "warning"}), "https://env-fallback")
 
     def test_default_webhook_in_config(self):
@@ -84,6 +90,20 @@ class TestRouting(unittest.TestCase):
             "routes": [],
         })
         self.assertEqual(routing.resolve_webhook_url({"severity": "warning"}), "https://config-default")
+
+    def test_redis_rules_win_over_file(self):
+        path = _write_config({
+            "default_slack_webhook_url": "https://from-file",
+            "routes": [],
+        })
+        redis_yaml = yaml.safe_dump({
+            "default_slack_webhook_url": "https://from-redis",
+            "routes": [],
+        })
+        with mock.patch.object(routing._redis, "routing_yaml_load", return_value=redis_yaml), \
+             mock.patch.object(routing._cfg, "ROUTING_CONFIG_PATH", path, create=True):
+            routing.reset_cache()
+            self.assertEqual(routing.resolve_webhook_url({}), "https://from-redis")
 
 
 if __name__ == "__main__":

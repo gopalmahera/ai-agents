@@ -20,6 +20,8 @@ PROMETHEUS_MCP_URL = os.getenv(
 LOKI_MCP_URL = os.getenv("LOKI_MCP_URL", "http://127.0.0.1:8003/mcp")
 KAFKA_MCP_URL = os.getenv("KAFKA_MCP_URL", "http://127.0.0.1:8004/mcp")
 LOGS_DIR = os.getenv("LOGS_DIR", "/app/logs")
+ROUTING_CONFIG_PATH = os.getenv("ROUTING_CONFIG_PATH", "")
+ALERT_CATALOG_PATH = os.getenv("ALERT_CATALOG_PATH", "")
 
 DEDUP_TTL_SECONDS = int(os.getenv("DEDUP_TTL_SECONDS", "900"))
 ALLOWED_ALERTNAMES = os.getenv("ALLOWED_ALERTNAMES", "")

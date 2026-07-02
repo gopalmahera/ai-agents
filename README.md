@@ -115,13 +115,15 @@ Next.js dashboard (`web/`) for configuring and monitoring the agent without edit
 |---|---|
 | **Dashboard** | Stat cards (received / accepted / deduplicated / LLM outcomes), MCP + Redis health |
 | **Config → AI Provider** | Provider (`openai` / `anthropic` / `gemini` / `bedrock` / `fake`), model, API key, LLM on/off |
-| **Config → MCP & Services** | Direct endpoints (`PROMETHEUS_URL`, `LOKI_URL`) and MCP server URLs, with per-section health checks |
+| **Config → Service Endpoints** | Direct data-source endpoints (`PROMETHEUS_URL`, `LOKI_URL`) with health checks; read-only status of the internal MCP servers |
 | **Config → Storage** | Logs dir, dedup TTL, allowed alertnames regex, catalog/routing paths |
 | **Routing** | Visual editor for `routing.yaml` rules |
 | **Logs** | Browse and view RCA / incoming log files |
 | **Reports** | 24h / 7d / 30d alert charts and per-alertname tables (from Redis stream) |
 
-Changes are saved to `config/web_config.json` (volume-mounted) and applied to the live process — no restart needed for most settings. Precedence: **env var > web_config.json > default**.
+Changes are saved to the shared Redis store (hash `config:store`), mirrored to `config/web_config.json`, and applied to every running agent replica within seconds — no restart needed. Precedence: **UI-stored value > env var > built-in default** (env vars act as initial defaults; anything set from the UI wins until cleared).
+
+MCP server URLs are **not** configurable — the MCP servers run inside the agent container on fixed localhost ports (8001-8004) and are shown as read-only status only.
 
 **Auth:** set `ADMIN_TOKEN` to require `Authorization: Bearer <token>` on all `/api/*` endpoints. If unset, auth is skipped (dev mode).
 
@@ -150,8 +152,39 @@ All runtime state lives in Redis (`redis_data` volume, AOF persistence) — it s
 | Counters | `INCRBY` (`alerts_received`, `llm_success`, `slack_error`, …) |
 | Per-alertname counts | `HINCRBY alertname:counts` |
 | Alert event history | Redis Stream `stream:alerts` (capped at 50k events) — powers the Reports page |
+| Runtime config | Hash `config:store` + version counter `config:version` |
+| Routing rules | String `config:routing_yaml` (YAML text) |
 
 Redis is a hard dependency at runtime — `docker compose` starts it automatically with a healthcheck before the agent.
+
+---
+
+## High Availability (multiple agent replicas)
+
+The agent is HA-ready: run 2+ `alert-agent` replicas behind a load balancer with **one shared Redis**, and everything stays consistent.
+
+```
+                    ┌──────────────┐
+   Web UI ────────► │ Load balancer│ ────► agent replica A ─┐
+   Alertmanager ──► │              │ ────► agent replica B ─┤
+                    └──────────────┘                        ▼
+                                                     shared Redis
+                                        (dedup, counters, config, pub/sub)
+```
+
+**Why it works:**
+
+- **Dedup is atomic and shared** — `SET NX EX` in Redis means the same alert fingerprint is investigated exactly once, no matter which replica receives it.
+- **Counters and reports are shared** — all replicas increment the same Redis keys, so the dashboard shows fleet-wide totals regardless of which replica serves the API request.
+- **Config changes sync automatically** — every replica runs a background sync thread (`services/config_sync.py`):
+  1. A config save (from the Web UI, hitting *any* replica) writes the Redis hash `config:store`, bumps `config:version`, and publishes to the `config:events` pub/sub channel.
+  2. Every replica's sync thread receives the event and re-applies the shared config to its live process within ~1 second.
+  3. A version poll every 30 s catches any pub/sub message missed during a Redis reconnect.
+  4. On startup, a replica applies the stored config immediately — new or restarted replicas converge without intervention.
+- **Routing rules sync the same way** — saved to `config:routing_yaml` in Redis and broadcast; each replica resets its routing cache on the event. The local `routing.yaml` file is only a fallback when Redis has no rules.
+- **`web_config.json` is a seed/mirror** — it populates Redis on first boot (migration from single-node setups) and keeps local dev working; Redis is the source of truth once running.
+
+If Redis is briefly unavailable, replicas keep serving with their last-applied config and reconnect automatically.
 
 ---
 

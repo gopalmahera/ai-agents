@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { AgentConfig, McpHealthEntry } from "@/lib/types";
 import { useState, useEffect } from "react";
-import { RefreshCw, Save, CheckCircle } from "lucide-react";
+import { RefreshCw, Save, CheckCircle, Lock } from "lucide-react";
 
 // ── Direct service endpoints (Prometheus, Loki) ───────────────────────────────
 const DIRECT_SERVICES = [
@@ -22,22 +22,20 @@ const DIRECT_SERVICES = [
   },
 ] as const;
 
-// ── MCP proxy server URLs ─────────────────────────────────────────────────────
+// ── Internal MCP servers (read-only — run inside the agent container) ─────────
 const MCP_SERVERS = [
-  { key: "K8S_MCP_URL", label: "Kubernetes", placeholder: "http://127.0.0.1:8001/mcp" },
-  { key: "PROMETHEUS_MCP_URL", label: "Prometheus", placeholder: "http://127.0.0.1:8002/mcp" },
-  { key: "LOKI_MCP_URL", label: "Loki", placeholder: "http://127.0.0.1:8003/mcp" },
-  { key: "KAFKA_MCP_URL", label: "Kafka", placeholder: "http://127.0.0.1:8004/mcp" },
+  { key: "K8S_MCP_URL", label: "Kubernetes" },
+  { key: "PROMETHEUS_MCP_URL", label: "Prometheus" },
+  { key: "LOKI_MCP_URL", label: "Loki" },
+  { key: "KAFKA_MCP_URL", label: "Kafka" },
 ] as const;
 
-type AllKeys =
-  | (typeof DIRECT_SERVICES)[number]["key"]
-  | (typeof MCP_SERVERS)[number]["key"];
+type ServiceKey = (typeof DIRECT_SERVICES)[number]["key"];
 
 function StatusDot({ entry }: { entry?: McpHealthEntry }) {
-  if (!entry) return <span className="inline-block w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-600" />;
+  if (!entry || entry.status === "not_configured")
+    return <span className="inline-block w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-600" />;
   if (entry.status === "healthy") return <span className="inline-block w-2 h-2 rounded-full bg-emerald-500" />;
-  if (entry.status === "not_configured") return <span className="inline-block w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-600" />;
   return <span className="inline-block w-2 h-2 rounded-full bg-red-500" />;
 }
 
@@ -56,13 +54,9 @@ export default function McpConfigPage() {
     queryFn: () => api.get<AgentConfig>("/api/config"),
   });
 
-  const [urls, setUrls] = useState<Record<AllKeys, string>>({
+  const [urls, setUrls] = useState<Record<ServiceKey, string>>({
     PROMETHEUS_URL: "",
     LOKI_URL: "",
-    K8S_MCP_URL: "",
-    PROMETHEUS_MCP_URL: "",
-    LOKI_MCP_URL: "",
-    KAFKA_MCP_URL: "",
   });
   const [saved, setSaved] = useState(false);
 
@@ -71,24 +65,9 @@ export default function McpConfigPage() {
       setUrls({
         PROMETHEUS_URL: config.PROMETHEUS_URL ?? "",
         LOKI_URL: config.LOKI_URL ?? "",
-        K8S_MCP_URL: config.K8S_MCP_URL ?? "",
-        PROMETHEUS_MCP_URL: config.PROMETHEUS_MCP_URL ?? "",
-        LOKI_MCP_URL: config.LOKI_MCP_URL ?? "",
-        KAFKA_MCP_URL: config.KAFKA_MCP_URL ?? "",
       });
     }
   }, [config]);
-
-  // MCP proxy health
-  const {
-    data: mcpHealth,
-    isFetching: mcpChecking,
-    refetch: checkMcp,
-  } = useQuery({
-    queryKey: ["mcp-health"],
-    queryFn: () => api.get<Record<string, McpHealthEntry>>("/api/config/mcp/health"),
-    enabled: false,
-  });
 
   // Direct service health
   const {
@@ -101,6 +80,17 @@ export default function McpConfigPage() {
     enabled: false,
   });
 
+  // Internal MCP server health
+  const {
+    data: mcpHealth,
+    isFetching: mcpChecking,
+    refetch: checkMcp,
+  } = useQuery({
+    queryKey: ["mcp-health"],
+    queryFn: () => api.get<Record<string, McpHealthEntry>>("/api/config/mcp/health"),
+    enabled: false,
+  });
+
   const saveMutation = useMutation({
     mutationFn: () => api.post("/api/config", urls),
     onSuccess: () => {
@@ -110,7 +100,7 @@ export default function McpConfigPage() {
     },
   });
 
-  const setUrl = (key: AllKeys, value: string) =>
+  const setUrl = (key: ServiceKey, value: string) =>
     setUrls((u) => ({ ...u, [key]: value }));
 
   if (isLoading) {
@@ -127,14 +117,14 @@ export default function McpConfigPage() {
     <div className="max-w-2xl space-y-6">
       <div>
         <h1 className="text-xl font-[Poppins] font-semibold text-slate-900 dark:text-slate-100">
-          MCP & Service Config
+          Service Endpoints
         </h1>
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-          Configure direct service endpoints and MCP proxy server URLs used by the agent.
+          Configure the data-source endpoints queried by the agent.
         </p>
       </div>
 
-      {/* ── Section 1: Direct service endpoints ── */}
+      {/* ── Section 1: Direct service endpoints (editable) ── */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <div>
@@ -142,7 +132,7 @@ export default function McpConfigPage() {
               Direct Service Endpoints
             </h2>
             <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
-              Raw API URLs queried directly by the agent (not via MCP).
+              Raw API URLs queried directly by the agent. Changes sync to all agent replicas.
             </p>
           </div>
           <button
@@ -178,17 +168,39 @@ export default function McpConfigPage() {
             </div>
           ))}
         </div>
+
+        <div className="flex items-center gap-3 mt-3">
+          <button
+            className="btn-primary"
+            onClick={() => saveMutation.mutate()}
+            disabled={saveMutation.isPending}
+          >
+            <Save size={14} />
+            {saveMutation.isPending ? "Saving…" : "Save"}
+          </button>
+          {saved && (
+            <span className="flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
+              <CheckCircle size={14} /> Saved
+            </span>
+          )}
+          {saveMutation.isError && (
+            <span className="text-sm text-red-600 dark:text-red-400">
+              {(saveMutation.error as Error).message}
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* ── Section 2: MCP server URLs ── */}
+      {/* ── Section 2: Internal MCP servers (read-only status) ── */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-              MCP Server URLs
+            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+              <Lock size={12} className="text-slate-400" />
+              Internal MCP Servers
             </h2>
             <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
-              FastMCP proxy servers that expose tools to the AI agent.
+              Run inside the agent container on fixed ports — not configurable.
             </p>
           </div>
           <button
@@ -202,49 +214,17 @@ export default function McpConfigPage() {
         </div>
 
         <div className="card divide-y divide-slate-100 dark:divide-slate-700">
-          {MCP_SERVERS.map(({ key, label, placeholder }) => (
-            <div key={key} className="py-4 first:pt-0 last:pb-0">
-              <div className="flex items-center gap-2 mb-1.5">
-                <StatusDot entry={mcpHealth?.[key]} />
-                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{label}</span>
-                <StatusBadge entry={mcpHealth?.[key]} />
-                {mcpHealth?.[key]?.error && (
-                  <span className="text-xs text-red-500 truncate max-w-xs" title={mcpHealth[key].error}>
-                    — {mcpHealth[key].error}
-                  </span>
-                )}
-              </div>
-              <input
-                className="input font-mono text-xs"
-                value={urls[key]}
-                onChange={(e) => setUrl(key, e.target.value)}
-                placeholder={placeholder}
-              />
+          {MCP_SERVERS.map(({ key, label }) => (
+            <div key={key} className="flex items-center gap-2 py-3 first:pt-0 last:pb-0">
+              <StatusDot entry={mcpHealth?.[key]} />
+              <span className="text-sm font-medium text-slate-700 dark:text-slate-300 w-28">{label}</span>
+              <span className="font-mono text-xs text-slate-400 dark:text-slate-500 truncate flex-1">
+                {mcpHealth?.[key]?.url ?? ""}
+              </span>
+              <StatusBadge entry={mcpHealth?.[key]} />
             </div>
           ))}
         </div>
-      </div>
-
-      {/* ── Save ── */}
-      <div className="flex items-center gap-3">
-        <button
-          className="btn-primary"
-          onClick={() => saveMutation.mutate()}
-          disabled={saveMutation.isPending}
-        >
-          <Save size={14} />
-          {saveMutation.isPending ? "Saving…" : "Save all"}
-        </button>
-        {saved && (
-          <span className="flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
-            <CheckCircle size={14} /> Saved
-          </span>
-        )}
-        {saveMutation.isError && (
-          <span className="text-sm text-red-600 dark:text-red-400">
-            {(saveMutation.error as Error).message}
-          </span>
-        )}
       </div>
     </div>
   );

@@ -6,10 +6,6 @@ export interface AgentConfig {
   SLACK_WEBHOOK_URL: string;
   PROMETHEUS_URL: string;
   LOKI_URL: string;
-  K8S_MCP_URL: string;
-  PROMETHEUS_MCP_URL: string;
-  LOKI_MCP_URL: string;
-  KAFKA_MCP_URL: string;
   LOGS_DIR: string;
   DEDUP_TTL_SECONDS: number | string;
   ALLOWED_ALERTNAMES: string;

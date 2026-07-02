@@ -53,7 +53,7 @@ function McpStatusRow({ health }: { health?: McpHealth }) {
       </div>
       {!health && (
         <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">
-          Go to Config → MCP Services and click &quot;Check health&quot; to see status.
+          Go to Config → Service Endpoints and click &quot;Check&quot; to see status.
         </p>
       )}
     </div>

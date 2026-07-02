@@ -4,20 +4,21 @@ from flask import Flask, jsonify, request, Response
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from controllers.investigation_controller import investigate_alert
-from config import DEDUP_TTL_SECONDS, _allowed_alertname_pattern
+import config as _cfg
 from views.report_view import log_incoming_payload
 from services.notification.slack_client import send_alert_status
 import services.store.redis_client as _redis
 
 
 def _is_allowed_alertname(alertname: str) -> bool:
-    if _allowed_alertname_pattern is None:
+    pattern = _cfg._allowed_alertname_pattern
+    if pattern is None:
         return True
-    return _allowed_alertname_pattern.search(alertname) is not None
+    return pattern.search(alertname) is not None
 
 
 def _is_duplicate(fingerprint: str) -> bool:
-    return _redis.dedup_check_and_set(fingerprint, DEDUP_TTL_SECONDS)
+    return _redis.dedup_check_and_set(fingerprint, _cfg.DEDUP_TTL_SECONDS)
 
 
 def _investigate_in_background(alert: dict) -> None:
