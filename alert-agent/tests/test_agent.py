@@ -93,6 +93,21 @@ class TestInvestigateAlert(unittest.TestCase):
         mock_det_rca.assert_called()
         mock_slack.assert_called_once()
 
+    @patch.object(_agent_module, "send_alert_report")
+    @patch.object(_agent_module, "save_rca", return_value="/tmp/rca.log")
+    @patch.object(_agent_module, "format_rca", side_effect=lambda rca, *a, **kw: rca)
+    @patch.object(_agent_module, "build_prefetch", return_value={"bullets": ["restart: 3"]})
+    @patch.object(_agent_module, "build_deterministic_rca", return_value="Deterministic RCA body")
+    @patch.object(_agent_module, "asyncio")
+    def test_falls_back_to_deterministic_on_transient_error(
+        self, mock_asyncio, mock_det_rca, mock_prefetch, mock_fmt, mock_save, mock_slack
+    ):
+        mock_asyncio.run.side_effect = TimeoutError("request timed out")
+        with patch.object(_agent_module, "LLM_ENABLED", True):
+            _agent_module.investigate_alert(FIRING_ALERT)
+        mock_det_rca.assert_called()
+        mock_slack.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

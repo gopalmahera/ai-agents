@@ -8,6 +8,12 @@ import config as _cfg
 from views.report_view import log_incoming_payload
 from services.notification.slack_client import send_alert_status
 import services.store.redis_client as _redis
+from utils.metrics import (
+    alerts_received,
+    alerts_deduplicated,
+    alerts_skipped,
+    alerts_accepted,
+)
 
 
 def _is_allowed_alertname(alertname: str) -> bool:
@@ -25,6 +31,17 @@ def _investigate_in_background(alert: dict) -> None:
     investigate_alert(alert)
 
 
+def _extract_test_alert(payload: dict) -> dict | None:
+    alerts = payload.get("alerts")
+    if alerts is not None:
+        if not alerts:
+            return None
+        return alerts[0]
+    if payload.get("labels"):
+        return payload
+    return None
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
 
@@ -35,6 +52,31 @@ def create_app() -> Flask:
     @app.get("/metrics")
     def metrics():
         return Response(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
+
+    @app.post("/webhook/test")
+    def webhook_test():
+        payload = request.get_json(silent=True)
+        if payload is None:
+            return jsonify({"status": "error", "message": "Invalid or missing JSON body"}), 400
+
+        alert = _extract_test_alert(payload)
+        if alert is None:
+            return jsonify(
+                {"status": "error", "message": "Expected webhook payload with alerts[] or a single alert object"}
+            ), 400
+
+        if alert.get("status") != "firing":
+            alert = {**alert, "status": "firing"}
+
+        try:
+            result = investigate_alert(alert, skip_slack=True)
+        except Exception as exc:
+            return jsonify({"status": "error", "message": str(exc)}), 500
+
+        if result is None:
+            return jsonify({"status": "error", "message": "Alert must have status=firing"}), 400
+
+        return jsonify({"status": "ok", **result})
 
     @app.post("/webhook")
     def webhook():
@@ -69,16 +111,19 @@ def create_app() -> Flask:
                 f"Received alert alertname={alertname} status={status} fingerprint={fingerprint}"
             )
             _redis.counter_inc("alerts_received")
+            alerts_received.labels(alertname=alertname).inc()
             _redis.alertname_inc(alertname)
 
             if status != "firing":
                 print(f"Skipping alert alertname={alertname} because status={status}")
                 _redis.counter_inc("alerts_skipped")
+                alerts_skipped.inc()
                 continue
 
             if not _is_allowed_alertname(alertname):
                 print(f"Skipping alert alertname={alertname} — not in ALLOWED_ALERTNAMES")
                 _redis.counter_inc("alerts_skipped")
+                alerts_skipped.inc()
                 continue
 
             if _is_duplicate(fingerprint):
@@ -86,6 +131,7 @@ def create_app() -> Flask:
                     f"Skipping duplicate alert alertname={alertname} fingerprint={fingerprint}"
                 )
                 _redis.counter_inc("alerts_deduplicated")
+                alerts_deduplicated.inc()
                 continue
 
             thread = threading.Thread(
@@ -95,6 +141,7 @@ def create_app() -> Flask:
             )
             thread.start()
             _redis.counter_inc("alerts_accepted")
+            alerts_accepted.inc()
             _redis.stream_add(
                 alertname=alertname,
                 outcome="accepted",

@@ -63,7 +63,13 @@ Previously all alerts went to a single Slack webhook. We added a **routing confi
 - First-match-wins ordering (same as Alertmanager)
 - A default fallback channel
 
-**To update routing:** edit `routing.yaml` on the server and restart the container. No code change, no rebuild.
+**To update routing:** use the Web UI, `POST /api/config/routing`, or edit `routing.yaml` — changes propagate without a container restart when using the API/Redis path.
+
+---
+
+### 3.5 On-Call Test Endpoint
+
+`POST /webhook/test` accepts a sample alert (full webhook payload or single alert object) and returns the generated RCA synchronously without posting to Slack — useful for validating investigations without waiting for a real incident.
 
 ---
 
@@ -100,8 +106,8 @@ swap usage, inode free space, disk read/write latency, failed systemd services, 
 
 | Improvement | Detail |
 |---|---|
-| **Deterministic fallback** | If OpenAI API is unavailable or quota exceeded, the agent falls back to a rule-based RCA using pre-fetched metrics — no silent failures |
-| **Alert deduplication** | Same alert firing twice within 15 minutes is suppressed (configurable) |
+| **Deterministic fallback** | If OpenAI API is unavailable, quota exceeded, or a transient error occurs (timeout, 5xx), the agent falls back to a rule-based RCA using pre-fetched metrics — no silent failures |
+| **Alert deduplication** | Same alert firing twice within 15 minutes is suppressed (configurable); backed by Redis so dedup survives container restarts |
 | **Slack retry with backoff** | Failed Slack posts retry up to 3 times (2s → 4s → 8s delay) |
 | **k8s graceful degradation** | If no Kubernetes credentials are available (local dev), k8s tools return a clear error instead of crashing the container |
 | **Body truncation** | RCA body is capped at 3,800 characters with a notice — prevents Slack API rejections |
@@ -110,21 +116,23 @@ swap usage, inode free space, disk read/write latency, failed systemd services, 
 
 ### 6. Observability
 
-The agent exposes Prometheus metrics at `/metrics`:
+The agent exposes Prometheus metrics at `/metrics` and a Web UI stats API at `/api/metrics/stats`:
 
 | Metric | What It Measures |
 |---|---|
-| `alerts_received_total` | Total alerts received per alert name |
-| `alerts_accepted_total` | Alerts that passed dedup and allowlist filters |
-| `alerts_deduplicated_total` | Duplicate alerts suppressed |
-| `llm_investigations_total` | LLM calls by outcome (success / fallback / error) |
-| `slack_posts_total` | Slack posts by outcome (success / error) |
+| `alert_agent_alerts_received_total` | Total alerts received per alert name |
+| `alert_agent_alerts_accepted_total` | Alerts that passed dedup and allowlist filters |
+| `alert_agent_alerts_deduplicated_total` | Duplicate alerts suppressed |
+| `alert_agent_llm_investigations_total` | LLM calls by outcome (success / fallback / error) |
+| `alert_agent_slack_posts_total` | Slack posts by outcome (success / error) |
+
+Redis also stores the same counters for the Web UI dashboard and HA replicas.
 
 ---
 
 ### 7. Test Coverage
 
-63 automated tests covering:
+78+ automated tests covering:
 - Alert routing (match/regex/first-match/fallback)
 - Slack formatting (header, body, truncation, color)
 - Alert context classification (pod vs host vs Kafka vs probe)
@@ -141,7 +149,9 @@ The agent exposes Prometheus metrics at `/metrics`:
 | Kubernetes (dozee-dev) | Manifests ready |
 | Kubernetes (dozee-pro) | Manifests ready |
 
-Single container per cluster. No database, no external queue. Logs saved to a mounted volume (`/app/logs`).
+Agent container plus a Redis instance per cluster (dedup, counters, shared config). No external queue. Logs saved to a mounted volume (`/app/logs`).
+
+**HA config sync:** routing and runtime settings can be updated via the Web UI or `POST /api/config/routing` without restarting the container. Changes propagate to all replicas via Redis pub/sub.
 
 ---
 
@@ -153,10 +163,8 @@ The following improvements are recommended for the next phase, prioritized by bu
 
 | Improvement | Business Value |
 |---|---|
-| **Persistent dedup store (Redis/SQLite)** | Currently dedup resets on container restart — duplicate RCAs can fire during deployments |
 | **Runbook links in RCA** | Each alert links directly to the runbook in the Slack message — reduces MTTR for common issues |
-| **`/webhook/test` endpoint** | On-call engineers can test a sample alert and see the RCA without waiting for a real incident |
-| **Routing hot-reload** | Edit `routing.yaml` without restarting the container — zero-downtime routing updates |
+| **Complete alert catalog in repo** | 42 built-in descriptions today; expand `config/alert_catalog.yaml` to cover all 153 production rules |
 
 ### Medium Priority
 
@@ -202,6 +210,7 @@ Cost optimization (GPT-4o-mini for info/warning severity) could reduce this by 6
 | Alert types covered | ~7 (basic pods only) | 153 rules across 5 categories |
 | Slack routing | Single channel | Per-channel by label rules |
 | RCA quality | Manual, inconsistent | Structured, reproducible, severity-colored |
-| Reliability | No fallback | LLM fallback + retry + dedup |
-| Observability | None | Prometheus metrics + `/metrics` endpoint |
-| Test coverage | 0 | 63 automated tests |
+| Reliability | No fallback | LLM fallback + retry + Redis-backed dedup |
+| Observability | None | Prometheus `/metrics` + Web UI stats API |
+| Test coverage | 0 | 78+ automated tests |
+| Config updates | Rebuild container | Web UI / API hot-reload via Redis |
