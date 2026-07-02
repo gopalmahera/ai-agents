@@ -12,6 +12,19 @@ services:
       timeout: 5s
       retries: 5
 
+  mongo:
+    image: mongo:7
+    command: ['--quiet']
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   alert-agent:
     build:
       context: .
@@ -34,9 +47,13 @@ services:
       CONFIG_STORE_PATH: /app/config/web_config.json
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
       REDIS_URL: redis://redis:6379/0
+      MONGO_URL: mongodb://mongo:27017
+      MONGO_DB: alert_agent
       AGENT_PORT: "8080"
     depends_on:
       redis:
+        condition: service_healthy
+      mongo:
         condition: service_healthy
     extra_hosts:
       - 'host.docker.internal:host-gateway'
@@ -56,3 +73,4 @@ services:
 
 volumes:
   redis_data:
+  mongo_data:

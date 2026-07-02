@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { MetricsStats, McpHealth } from "@/lib/types";
-import { Activity, CheckCircle, XCircle, Zap, AlertTriangle, RefreshCw, Database, BellOff } from "lucide-react";
+import { Activity, CheckCircle, XCircle, Zap, AlertTriangle, RefreshCw, Database, BellOff, DollarSign } from "lucide-react";
 
 function StatCard({ label, value, icon: Icon, sub }: {
   label: string; value: number | string; icon: React.ElementType; sub?: string;
@@ -118,8 +118,24 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
         <McpStatusRow health={health} />
+
+        <div className="card flex items-center gap-3">
+          <DollarSign size={16} className="text-emerald-500 shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-300">AI Usage (total)</p>
+            <p className="text-lg font-[Poppins] font-bold text-slate-900 dark:text-slate-100">
+              ${(stats?.llm_usage?.cost_usd ?? 0).toFixed(4)}
+            </p>
+            <p className="text-xs text-slate-400 dark:text-slate-500">
+              {(stats?.llm_usage?.total_tokens ?? 0).toLocaleString()} tokens
+              {stats?.llm_usage
+                ? ` · ${(stats.llm_usage.input_tokens).toLocaleString()} in / ${(stats.llm_usage.output_tokens).toLocaleString()} out`
+                : ""}
+            </p>
+          </div>
+        </div>
 
         <div className="card flex items-center gap-3">
           <Database size={14} className={redisHealth?.status === "ok" ? "text-emerald-500" : "text-red-500"} />
@@ -133,6 +149,22 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {stats?.cost_by_model && Object.keys(stats.cost_by_model).length > 0 && (
+        <div className="card mb-4">
+          <h2 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">Cost by model</h2>
+          <div className="space-y-1.5">
+            {Object.entries(stats.cost_by_model)
+              .sort((a, b) => b[1] - a[1])
+              .map(([model, usd]) => (
+                <div key={model} className="flex items-center justify-between text-sm">
+                  <span className="font-mono text-xs text-slate-500 dark:text-slate-400 truncate">{model}</span>
+                  <span className="font-medium text-slate-700 dark:text-slate-300">${usd.toFixed(4)}</span>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
 
       {stats && Object.keys(stats.by_alertname).length > 0 && (
         <div className="card">

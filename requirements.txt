@@ -1,7 +1,6 @@
 flask
 gunicorn
-openai
-pydantic-ai-slim[mcp]
+pydantic-ai-slim[mcp,openai,anthropic,google,bedrock]
 httpx
 requests
 mcp
@@ -9,3 +8,4 @@ kubernetes
 prometheus_client
 pyyaml
 redis
+pymongo

@@ -10,6 +10,7 @@ from api.auth import require_auth
 from views.report_view import log_incoming_payload
 from services.notification.slack_client import send_alert_status
 import services.store.redis_client as _redis
+import services.store.mongo_client as _mongo
 from utils.metrics import (
     alerts_received,
     alerts_deduplicated,
@@ -200,6 +201,11 @@ def create_app() -> Flask:
                     fingerprint=fingerprint,
                     extra={"silence_id": silence_id or ""},
                 )
+                _mongo.record_event(
+                    alertname=alertname, outcome="silenced",
+                    namespace=labels.get("namespace", ""), fingerprint=fingerprint,
+                    severity=labels.get("severity", ""), silence_id=silence_id or "",
+                )
                 continue
 
             if _is_duplicate(fingerprint):
@@ -232,6 +238,11 @@ def create_app() -> Flask:
                     namespace=labels.get("namespace", ""),
                     fingerprint=fingerprint,
                 )
+                _mongo.record_event(
+                    alertname=alertname, outcome="queue_full",
+                    namespace=labels.get("namespace", ""), fingerprint=fingerprint,
+                    severity=labels.get("severity", ""),
+                )
                 continue
 
             try:
@@ -246,6 +257,11 @@ def create_app() -> Flask:
                 outcome="accepted",
                 namespace=alert.get("labels", {}).get("namespace", ""),
                 fingerprint=fingerprint,
+            )
+            _mongo.record_event(
+                alertname=alertname, outcome="accepted",
+                namespace=labels.get("namespace", ""), fingerprint=fingerprint,
+                severity=labels.get("severity", ""),
             )
             accepted += 1
 

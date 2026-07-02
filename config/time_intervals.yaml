@@ -1,13 +1,1 @@
-time_intervals:
-- name: offpick
-  time_intervals:
-  - location: UTC
-    times:
-    - end_time: 06:00
-      start_time: '22:00'
-    weekdays:
-    - monday
-    - tuesday
-    - wednesday
-    - thursday
-    - friday
+time_intervals: []

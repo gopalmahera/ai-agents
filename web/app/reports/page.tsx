@@ -37,8 +37,9 @@ export default function ReportsPage() {
         <div>
           <h1 className="text-xl font-[Poppins] font-semibold text-slate-900 dark:text-slate-100">Reports</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-            Alert activity from Redis stream.
-            {data && ` ${data.files} events in the last ${days === 1 ? "24h" : `${days}d`}.`}
+            Alert activity{data?.source === "mongo" ? " from MongoDB history" : " from Redis stream"}.
+            {data && ` ${data.files} events in the last ${days === 1 ? "24h" : `${days}d`}`}
+            {data?.totals ? ` · $${data.totals.cost_usd.toFixed(4)} LLM cost.` : "."}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -101,6 +102,7 @@ export default function ReportsPage() {
                       <th className="px-5 py-3 font-medium text-right">RCA</th>
                       <th className="px-5 py-3 font-medium text-right">Received</th>
                       <th className="px-5 py-3 font-medium text-right">Total</th>
+                      {data?.source === "mongo" && <th className="px-5 py-3 font-medium text-right">Cost</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
@@ -112,6 +114,11 @@ export default function ReportsPage() {
                         <td className="px-5 py-3 text-right font-medium text-slate-700 dark:text-slate-300">
                           {counts.rca + counts.incoming}
                         </td>
+                        {data?.source === "mongo" && (
+                          <td className="px-5 py-3 text-right text-slate-500 dark:text-slate-400">
+                            ${(counts.cost_usd ?? 0).toFixed(4)}
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -120,7 +127,7 @@ export default function ReportsPage() {
             </div>
           ) : (
             <div className="card text-center py-16">
-              <p className="text-slate-500 dark:text-slate-400 text-sm">No alert events in Redis for the selected period.</p>
+              <p className="text-slate-500 dark:text-slate-400 text-sm">No alert events for the selected period.</p>
               <p className="text-slate-400 dark:text-slate-500 text-xs mt-1">Events are written when the agent processes alerts.</p>
             </div>
           )}

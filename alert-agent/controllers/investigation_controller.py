@@ -10,6 +10,7 @@ from services.llm.mcp_client import run_investigation
 from views.slack_view import format_rca, format_report_header
 from services.notification.slack_client import send_alert_report
 import services.store.redis_client as _redis
+import services.store.mongo_client as _mongo
 from utils.metrics import llm_investigations, slack_posts
 from services.notification import silences as _silences
 from utils.log import get_logger
@@ -72,15 +73,17 @@ def _attach_recurrence(alert: dict) -> dict:
     return alert
 
 
-def _run_rca(alert: dict, ctx, prefetched) -> str:
+def _run_rca(alert: dict, ctx, prefetched) -> tuple[str, dict | None]:
+    """Return (rca_text, usage). usage is the priced LLM usage dict or None
+    (deterministic fallback has no LLM cost)."""
     if not _cfg.LLM_ENABLED:
         _record_llm_outcome("fallback")
-        return build_deterministic_rca(ctx, prefetched)
+        return build_deterministic_rca(ctx, prefetched), None
 
     try:
-        result = asyncio.run(run_investigation(alert, prefetched=prefetched))
+        output, usage = asyncio.run(run_investigation(alert, prefetched=prefetched))
         _record_llm_outcome("success")
-        return result
+        return output, usage
     except Exception as exc:
         if _should_fallback_to_deterministic(exc, prefetched):
             logger.warning(
@@ -88,12 +91,12 @@ def _run_rca(alert: dict, ctx, prefetched) -> str:
                 extra={"alertname": ctx.alertname, "error": str(exc), "event": "llm_fallback"},
             )
             _record_llm_outcome("fallback")
-            return build_deterministic_rca(ctx, prefetched)
+            return build_deterministic_rca(ctx, prefetched), None
         _record_llm_outcome("error")
         raise
 
 
-def _save_report(alert: dict, ctx, body: str, *, skip_slack: bool = False) -> dict:
+def _save_report(alert: dict, ctx, body: str, *, usage: dict | None = None, skip_slack: bool = False) -> dict:
     labels = alert.get("labels", {})
     header = format_report_header(ctx, labels, alert=alert)
     report = f"{header}\n\n{body.strip()}"
@@ -114,6 +117,9 @@ def _save_report(alert: dict, ctx, body: str, *, skip_slack: bool = False) -> di
 
     alertname = alert.get("labels", {}).get("alertname", "unknown")
     fingerprint = alert.get("fingerprint", "")
+    namespace = labels.get("namespace", "")
+    severity = labels.get("severity", "")
+    usage = usage or {}
     try:
         send_alert_report(alert, header, body.strip())
         _redis.counter_inc("slack_success")
@@ -123,6 +129,10 @@ def _save_report(alert: dict, ctx, body: str, *, skip_slack: bool = False) -> di
             outcome="rca_success",
             fingerprint=fingerprint,
         )
+        _mongo.record_event(
+            alertname=alertname, outcome="rca_success", namespace=namespace,
+            fingerprint=fingerprint, severity=severity, **usage,
+        )
     except Exception as exc:
         _redis.counter_inc("slack_error")
         slack_posts.labels(outcome="error").inc()
@@ -130,6 +140,10 @@ def _save_report(alert: dict, ctx, body: str, *, skip_slack: bool = False) -> di
             alertname=alertname,
             outcome="rca_slack_error",
             fingerprint=fingerprint,
+        )
+        _mongo.record_event(
+            alertname=alertname, outcome="rca_slack_error", namespace=namespace,
+            fingerprint=fingerprint, severity=severity, **usage,
         )
         logger.warning(
             "Failed to send Slack alert report",
@@ -169,9 +183,9 @@ def investigate_alert(alert: dict, *, skip_slack: bool = False) -> dict | None:
     prefetched = build_prefetch(ctx, alert)
 
     try:
-        rca = _run_rca(alert, ctx, prefetched)
+        rca, usage = _run_rca(alert, ctx, prefetched)
         rca = format_rca(rca, ctx, prefetched=prefetched)
-        return _save_report(alert, ctx, rca, skip_slack=skip_slack)
+        return _save_report(alert, ctx, rca, usage=usage, skip_slack=skip_slack)
     except Exception as exc:
         if _should_fallback_to_deterministic(exc, prefetched):
             try:
@@ -182,7 +196,7 @@ def investigate_alert(alert: dict, *, skip_slack: bool = False) -> dict | None:
                     "Deterministic fallback after investigation error",
                     extra={"alertname": alertname, "event": "llm_fallback"},
                 )
-                return _save_report(alert, ctx, rca, skip_slack=skip_slack)
+                return _save_report(alert, ctx, rca, usage=None, skip_slack=skip_slack)
             except Exception:
                 pass
 

@@ -127,6 +127,42 @@ def is_available() -> bool:
         return False
 
 
+# ── LLM token usage & cost ────────────────────────────────────────────────────
+# Cost is stored as integer micro-USD (USD * 1e6) so INCRBY stays integer-safe.
+
+_COST_BY_MODEL = "llm:cost_micro_by_model"
+_TOKENS_BY_MODEL = "llm:tokens_by_model"
+
+
+def record_llm_usage(
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cost_micro_usd: int,
+) -> None:
+    input_tokens = input_tokens or 0
+    output_tokens = output_tokens or 0
+    total = input_tokens + output_tokens
+    cost_micro_usd = cost_micro_usd or 0
+    pipe = get().pipeline()
+    pipe.incrby("counter:tokens_input", input_tokens)
+    pipe.incrby("counter:tokens_output", output_tokens)
+    pipe.incrby("counter:tokens_total", total)
+    pipe.incrby("counter:cost_micro_usd", cost_micro_usd)
+    if model:
+        pipe.hincrby(_COST_BY_MODEL, model, cost_micro_usd)
+        pipe.hincrby(_TOKENS_BY_MODEL, model, total)
+    pipe.execute()
+
+
+def llm_cost_micro_by_model() -> dict[str, int]:
+    return {m: int(v) for m, v in get().hgetall(_COST_BY_MODEL).items()}
+
+
+def llm_tokens_by_model() -> dict[str, int]:
+    return {m: int(v) for m, v in get().hgetall(_TOKENS_BY_MODEL).items()}
+
+
 # ── Shared config store (synced across replicas) ──────────────────────────────
 
 _CONFIG_HASH = "config:store"

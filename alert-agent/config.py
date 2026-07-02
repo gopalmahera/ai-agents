@@ -35,6 +35,9 @@ RECURRENCE_THRESHOLD = int(os.getenv("RECURRENCE_THRESHOLD", "3"))
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 CONFIG_STORE_PATH = os.getenv("CONFIG_STORE_PATH", "/app/config/web_config.json")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+# Optional durable history/reports store. Empty = disabled (Redis stream only).
+MONGO_URL = os.getenv("MONGO_URL", "")
+MONGO_DB = os.getenv("MONGO_DB", "alert_agent")
 AGENT_PORT = int(os.getenv("AGENT_PORT", "8080"))
 
 _allowed_alertname_pattern: re.Pattern[str] | None = None

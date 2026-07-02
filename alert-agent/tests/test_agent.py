@@ -72,7 +72,7 @@ class TestInvestigateAlert(unittest.TestCase):
     def test_llm_path_when_enabled(
         self, mock_asyncio, mock_prefetch, mock_fmt, mock_save, mock_slack
     ):
-        mock_asyncio.run.return_value = "LLM RCA body"
+        mock_asyncio.run.return_value = ("LLM RCA body", None)
         with patch.object(_agent_module._cfg, "LLM_ENABLED", True):
             _agent_module.investigate_alert(FIRING_ALERT)
         mock_asyncio.run.assert_called_once()
