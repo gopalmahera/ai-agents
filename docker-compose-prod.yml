@@ -1,0 +1,4 @@
+# Production — Dozee Alert Intelligence (DAI)
+include:
+  - path: infra/docker/docker-compose.base.yml
+  - path: infra/docker/docker-compose.prod.yml
