@@ -81,13 +81,14 @@ def _sub_interval_active(sub: dict[str, Any], now: datetime) -> bool:
 
 def is_interval_active(name: str, now: datetime | None = None) -> bool:
     """Return True if any sub-interval for ``name`` is active at ``now``."""
-    global _intervals_by_name
-    if _intervals_by_name is None:
+    mapping = _intervals_by_name
+    if mapping is None:
         from services.notification import time_intervals_store
         time_intervals_store.ensure_loaded()
-    if _intervals_by_name is None:
+        mapping = _intervals_by_name
+    if mapping is None:
         return False
-    subs = _intervals_by_name.get(name)
+    subs = mapping.get(name)
     if not subs:
         return False
     current = now or datetime.now().astimezone()

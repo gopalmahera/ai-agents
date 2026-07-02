@@ -1,3 +1,4 @@
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from flask import Flask, jsonify, request, Response
@@ -5,6 +6,7 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from controllers.investigation_controller import investigate_alert
 import config as _cfg
+from api.auth import require_auth
 from views.report_view import log_incoming_payload
 from services.notification.slack_client import send_alert_status
 import services.store.redis_client as _redis
@@ -21,6 +23,7 @@ from utils.log import get_logger
 logger = get_logger(__name__)
 
 _executor: ThreadPoolExecutor | None = None
+_slots: threading.Semaphore | None = None
 
 
 def _get_executor() -> ThreadPoolExecutor:
@@ -31,6 +34,20 @@ def _get_executor() -> ThreadPoolExecutor:
             thread_name_prefix="investigate",
         )
     return _executor
+
+
+def _get_slots() -> threading.Semaphore:
+    """Bounds in-flight + queued investigations (storm protection).
+
+    ThreadPoolExecutor's internal queue is unbounded, so without this a storm
+    would enqueue without limit. Capacity = workers + queue depth.
+    """
+    global _slots
+    if _slots is None:
+        _slots = threading.Semaphore(
+            _cfg.INVESTIGATION_MAX_WORKERS + _cfg.INVESTIGATION_QUEUE_MAX
+        )
+    return _slots
 
 
 def _is_allowed_alertname(alertname: str) -> bool:
@@ -45,7 +62,10 @@ def _is_duplicate(fingerprint: str) -> bool:
 
 
 def _investigate_in_background(alert: dict) -> None:
-    investigate_alert(alert)
+    try:
+        investigate_alert(alert)
+    finally:
+        _get_slots().release()
 
 
 def _extract_test_alert(payload: dict) -> dict | None:
@@ -71,6 +91,7 @@ def create_app() -> Flask:
         return Response(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
 
     @app.post("/webhook/test")
+    @require_auth
     def webhook_test():
         payload = request.get_json(silent=True)
         if payload is None:
@@ -194,7 +215,30 @@ def create_app() -> Flask:
                 alerts_deduplicated.inc()
                 continue
 
-            _get_executor().submit(_investigate_in_background, alert)
+            if not _get_slots().acquire(blocking=False):
+                logger.warning(
+                    "Alert rejected — investigation queue full",
+                    extra={
+                        "event": "queue_full",
+                        "alertname": alertname,
+                        "fingerprint": fingerprint,
+                        "outcome": "queue_full",
+                    },
+                )
+                _redis.counter_inc("queue_full")
+                _redis.stream_add(
+                    alertname=alertname,
+                    outcome="queue_full",
+                    namespace=labels.get("namespace", ""),
+                    fingerprint=fingerprint,
+                )
+                continue
+
+            try:
+                _get_executor().submit(_investigate_in_background, alert)
+            except Exception:
+                _get_slots().release()
+                raise
             _redis.counter_inc("alerts_accepted")
             alerts_accepted.inc()
             _redis.stream_add(

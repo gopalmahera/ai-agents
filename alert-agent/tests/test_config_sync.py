@@ -38,6 +38,16 @@ class TestConfigSync(unittest.TestCase):
         reset.assert_called_once()
         self.assertEqual(sync._applied_version, 7)
 
+    def test_version_not_advanced_when_apply_raises(self):
+        # Redis blip during apply_stored must NOT burn the version, or the
+        # replica would skip this update forever.
+        sync._applied_version = 5
+        with mock.patch.object(sync._redis, "config_version", return_value=9), \
+             mock.patch.object(sync.config_store, "apply_stored", side_effect=Exception("redis down")):
+            with self.assertRaises(Exception):
+                sync._apply_if_newer()
+        self.assertEqual(sync._applied_version, 5)  # unchanged → retried later
+
     def test_start_is_idempotent(self):
         with mock.patch.object(sync.threading, "Thread") as thread_cls:
             sync._started = False

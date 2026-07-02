@@ -92,7 +92,15 @@ export default function McpConfigPage() {
   });
 
   const saveMutation = useMutation({
-    mutationFn: () => api.post("/api/config", urls),
+    // Post only fields the user actually changed, so editing one endpoint
+    // doesn't pin the other's env-derived value into the Redis store.
+    mutationFn: () => {
+      const changed: Record<string, string> = {};
+      (Object.keys(urls) as ServiceKey[]).forEach((k) => {
+        if (urls[k] !== (config?.[k] ?? "")) changed[k] = urls[k];
+      });
+      return api.post("/api/config", changed);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["config"] });
       setSaved(true);

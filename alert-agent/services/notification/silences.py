@@ -9,7 +9,12 @@ from typing import Any
 import yaml
 
 import services.store.redis_client as _redis
+from services.config_store import ConfigStoreUnavailable
 from services.notification.routing import matches_labels
+from utils.fs import atomic_write_text
+from utils.log import get_logger
+
+logger = get_logger(__name__)
 
 _config: dict[str, Any] | None = None
 _SILENCES_CONFIG_PATH = os.getenv("SILENCES_CONFIG_PATH", "/app/config/silences.yaml")
@@ -135,23 +140,35 @@ def prune_expired(now: datetime | None = None) -> bool:
     if changed:
         cfg["silences"]["active"] = kept
         cfg["silences"]["disabled"] = disabled
-        _persist_config(cfg)
+        # Best-effort: this runs on the hot path (every alert). If Redis is
+        # down we skip persisting — the expired rule is re-pruned next time.
+        _persist_config(cfg, required=False)
     return changed
 
 
-def _persist_config(cfg: dict[str, Any]) -> None:
+def _persist_config(cfg: dict[str, Any], *, required: bool = True) -> None:
+    """Persist silences to Redis (source of truth) and the file mirror.
+
+    ``required=True`` (API writes): raise ConfigStoreUnavailable if Redis is
+    down so the endpoint returns 503. ``required=False`` (background prune):
+    log and skip on Redis failure rather than crashing alert processing.
+    """
     yaml_text = yaml.safe_dump(cfg, default_flow_style=False, allow_unicode=True)
     try:
-        _redis.silences_yaml_save(yaml_text)
-        _redis.publish_config_event("silences")
+        _redis.save_yaml_and_publish("silences", yaml_text)
     except Exception as exc:
-        print(f"[silences] Redis save failed: {exc}")
+        if required:
+            raise ConfigStoreUnavailable(str(exc)) from exc
+        logger.warning(
+            "Silences persist skipped — Redis unavailable",
+            extra={"event": "config_store_unavailable", "error": str(exc)},
+        )
+        reset_cache()
+        return
     try:
-        os.makedirs(os.path.dirname(_SILENCES_CONFIG_PATH) or ".", exist_ok=True)
-        with open(_SILENCES_CONFIG_PATH, "w", encoding="utf-8") as fh:
-            fh.write(yaml_text)
+        atomic_write_text(_SILENCES_CONFIG_PATH, yaml_text)
     except Exception as exc:
-        print(f"[silences] File save failed: {exc}")
+        logger.warning("Silences file mirror failed", extra={"event": "config_file_error", "error": str(exc)})
     reset_cache()
 
 
@@ -174,6 +191,6 @@ def get_config() -> dict[str, Any]:
 
 
 def save_config(body: dict[str, Any]) -> None:
-    global _config
-    _config = _extract_silences(body)
-    _persist_config(_config)
+    # Persist first (raises 503 on Redis failure before mutating cache); the
+    # cache is reset inside _persist_config so the next load reads the new value.
+    _persist_config(_extract_silences(body), required=True)

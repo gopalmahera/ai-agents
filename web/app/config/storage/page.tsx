@@ -35,7 +35,16 @@ export default function StorageConfigPage() {
   }, [data]);
 
   const mutation = useMutation({
-    mutationFn: () => api.post("/api/config", { ...form, DEDUP_TTL_SECONDS: parseInt(form.DEDUP_TTL_SECONDS, 10) }),
+    // Post only changed fields to avoid pinning env-derived values.
+    mutationFn: () => {
+      const changed: Record<string, unknown> = {};
+      if (form.LOGS_DIR !== (data?.LOGS_DIR ?? "")) changed.LOGS_DIR = form.LOGS_DIR;
+      if (form.ALERT_CATALOG_PATH !== (data?.ALERT_CATALOG_PATH ?? "")) changed.ALERT_CATALOG_PATH = form.ALERT_CATALOG_PATH;
+      if (form.ROUTING_CONFIG_PATH !== (data?.ROUTING_CONFIG_PATH ?? "")) changed.ROUTING_CONFIG_PATH = form.ROUTING_CONFIG_PATH;
+      if (form.DEDUP_TTL_SECONDS !== String(data?.DEDUP_TTL_SECONDS ?? "")) changed.DEDUP_TTL_SECONDS = parseInt(form.DEDUP_TTL_SECONDS, 10);
+      if (form.ALLOWED_ALERTNAMES !== (data?.ALLOWED_ALERTNAMES ?? "")) changed.ALLOWED_ALERTNAMES = form.ALLOWED_ALERTNAMES;
+      return api.post("/api/config", changed);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["config"] });
       setSaved(true);

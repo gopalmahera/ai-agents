@@ -8,7 +8,12 @@ from typing import Any
 import yaml
 
 import services.store.redis_client as _redis
+from services.config_store import ConfigStoreUnavailable
 from services.notification import time_intervals as _engine
+from utils.fs import atomic_write_text
+from utils.log import get_logger
+
+logger = get_logger(__name__)
 
 _CONFIG_PATH = os.getenv("TIME_INTERVALS_CONFIG_PATH", "/app/config/time_intervals.yaml")
 _config: dict[str, Any] | None = None
@@ -20,8 +25,9 @@ def _default_config() -> dict[str, Any]:
 
 def _load_config() -> dict[str, Any]:
     global _config
-    if _config is not None:
-        return _config
+    cached = _config
+    if cached is not None:
+        return cached
 
     text = None
     source = ""
@@ -58,18 +64,20 @@ def _load_config() -> dict[str, Any]:
             source = legacy_path
 
     if not text:
-        _config = _default_config()
+        data = _default_config()
+        _config = data
         _engine.set_intervals([])
-        return _config
+        return data
 
-    _config = yaml.safe_load(text) or _default_config()
-    if "time_intervals" not in _config:
-        _config["time_intervals"] = []
+    data = yaml.safe_load(text) or _default_config()
+    if "time_intervals" not in data:
+        data["time_intervals"] = []
 
-    _engine.set_intervals(_config.get("time_intervals"))
-    count = len(_config.get("time_intervals", []))
+    _config = data
+    _engine.set_intervals(data.get("time_intervals"))
+    count = len(data.get("time_intervals", []))
     print(f"[time_intervals] Loaded {count} named interval(s) from {source}")
-    return _config
+    return data
 
 
 def reset_cache() -> None:
@@ -96,19 +104,19 @@ def get_interval_names() -> list[str]:
 
 
 def save_config(body: dict[str, Any]) -> None:
-    global _config
-    _config = body
+    """Persist named time intervals to Redis (required) and the file mirror.
+
+    Raises ConfigStoreUnavailable if Redis is down so the endpoint returns 503;
+    the cache is only refreshed after a successful save.
+    """
     yaml_text = yaml.safe_dump(body, default_flow_style=False, allow_unicode=True)
     try:
-        _redis.time_intervals_yaml_save(yaml_text)
-        _redis.publish_config_event("time_intervals")
+        _redis.save_yaml_and_publish("time_intervals", yaml_text)
     except Exception as exc:
-        print(f"[time_intervals] Redis save failed: {exc}")
+        raise ConfigStoreUnavailable(str(exc)) from exc
     try:
-        os.makedirs(os.path.dirname(_CONFIG_PATH) or ".", exist_ok=True)
-        with open(_CONFIG_PATH, "w", encoding="utf-8") as fh:
-            fh.write(yaml_text)
+        atomic_write_text(_CONFIG_PATH, yaml_text)
     except Exception as exc:
-        print(f"[time_intervals] File save failed: {exc}")
+        logger.warning("Time-intervals file mirror failed", extra={"event": "config_file_error", "error": str(exc)})
     reset_cache()
     _load_config()

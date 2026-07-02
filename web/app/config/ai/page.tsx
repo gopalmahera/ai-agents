@@ -51,11 +51,12 @@ export default function AIConfigPage() {
   };
 
   const handleSave = () => {
-    const payload: Record<string, unknown> = {
-      AI_PROVIDER: form.AI_PROVIDER,
-      OPENAI_MODEL: form.OPENAI_MODEL,
-      LLM_ENABLED: form.LLM_ENABLED,
-    };
+    // Post only changed fields; the API key is only sent when re-entered.
+    const payload: Record<string, unknown> = {};
+    if (form.AI_PROVIDER !== (data?.AI_PROVIDER ?? "")) payload.AI_PROVIDER = form.AI_PROVIDER;
+    if (form.OPENAI_MODEL !== (data?.OPENAI_MODEL ?? "")) payload.OPENAI_MODEL = form.OPENAI_MODEL;
+    const dataLlm = data?.LLM_ENABLED === true || data?.LLM_ENABLED === "true";
+    if (form.LLM_ENABLED !== dataLlm) payload.LLM_ENABLED = form.LLM_ENABLED;
     if (form.OPENAI_API_KEY) payload.OPENAI_API_KEY = form.OPENAI_API_KEY;
     mutation.mutate(payload as Partial<AgentConfig>);
   };

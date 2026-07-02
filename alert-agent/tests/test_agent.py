@@ -56,7 +56,7 @@ class TestInvestigateAlert(unittest.TestCase):
     @patch.object(_agent_module, "format_rca", side_effect=lambda rca, *a, **kw: rca)
     @patch.object(_agent_module, "build_prefetch", return_value=None)
     @patch.object(_agent_module, "build_deterministic_rca", return_value="Deterministic RCA body")
-    @patch.object(_agent_module, "LLM_ENABLED", False)
+    @patch.object(_agent_module._cfg, "LLM_ENABLED", False)
     def test_deterministic_path_when_llm_disabled(
         self, mock_det_rca, mock_prefetch, mock_fmt, mock_save, mock_slack
     ):
@@ -73,7 +73,7 @@ class TestInvestigateAlert(unittest.TestCase):
         self, mock_asyncio, mock_prefetch, mock_fmt, mock_save, mock_slack
     ):
         mock_asyncio.run.return_value = "LLM RCA body"
-        with patch.object(_agent_module, "LLM_ENABLED", True):
+        with patch.object(_agent_module._cfg, "LLM_ENABLED", True):
             _agent_module.investigate_alert(FIRING_ALERT)
         mock_asyncio.run.assert_called_once()
         mock_slack.assert_called_once()
@@ -88,7 +88,7 @@ class TestInvestigateAlert(unittest.TestCase):
         self, mock_asyncio, mock_det_rca, mock_prefetch, mock_fmt, mock_save, mock_slack
     ):
         mock_asyncio.run.side_effect = Exception("429 quota")
-        with patch.object(_agent_module, "LLM_ENABLED", True):
+        with patch.object(_agent_module._cfg, "LLM_ENABLED", True):
             _agent_module.investigate_alert(FIRING_ALERT)
         mock_det_rca.assert_called()
         mock_slack.assert_called_once()
@@ -103,7 +103,7 @@ class TestInvestigateAlert(unittest.TestCase):
         self, mock_asyncio, mock_det_rca, mock_prefetch, mock_fmt, mock_save, mock_slack
     ):
         mock_asyncio.run.side_effect = TimeoutError("request timed out")
-        with patch.object(_agent_module, "LLM_ENABLED", True):
+        with patch.object(_agent_module._cfg, "LLM_ENABLED", True):
             _agent_module.investigate_alert(FIRING_ALERT)
         mock_det_rca.assert_called()
         mock_slack.assert_called_once()

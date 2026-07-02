@@ -30,6 +30,9 @@ _started = False
 
 def _apply(version: int) -> None:
     global _applied_version
+    # apply_stored() raises if Redis is unreachable — do NOT advance the applied
+    # version in that case, or this replica would skip the update forever. The
+    # caller (_run) catches the exception and retries.
     config_store.apply_stored()
     _reset_routing_cache()
     _reset_mute_cache()
@@ -69,6 +72,17 @@ def _apply_if_newer(force: bool = False) -> None:
 
 
 def _run() -> None:
+    # Apply the local file mirror once at boot, independent of Redis, so
+    # UI-stored secrets (OPENAI_API_KEY, SLACK_WEBHOOK_URL) are live even if
+    # Redis is unreachable at startup. Redis values override this once reached.
+    try:
+        config_store.apply_from_file()
+    except Exception as exc:
+        logger.warning(
+            "Boot file-config apply failed",
+            extra={"event": "config_sync_error", "error": str(exc)},
+        )
+
     pubsub = None
     last_check = 0.0
     while True:

@@ -69,6 +69,26 @@ class TestAppWebhook(unittest.TestCase):
         mock_executor.return_value.submit.assert_not_called()
         self.assertEqual(response.get_json()["accepted"], 0)
 
+    @patch.object(webhook_controller, "log_incoming_payload")
+    @patch.object(webhook_controller, "_redis")
+    @patch.object(webhook_controller, "_get_executor")
+    @patch.object(webhook_controller, "_get_slots")
+    def test_queue_full_rejects_and_records(self, mock_slots, mock_executor, mock_redis, _mock_log):
+        mock_redis.dedup_check_and_set.return_value = False
+        mock_slots.return_value.acquire.return_value = False  # queue at capacity
+        response = self.client.post("/webhook", json=FIRING_WEBHOOK)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["accepted"], 0)
+        mock_executor.return_value.submit.assert_not_called()
+        mock_redis.counter_inc.assert_any_call("queue_full")
+
+    def test_webhook_test_requires_auth_when_token_set(self):
+        with patch.object(webhook_controller._cfg, "ADMIN_TOKEN", "secret"), \
+             patch.object(webhook_controller, "investigate_alert") as mock_investigate:
+            response = self.client.post("/webhook/test", json=FIRING_WEBHOOK)
+        self.assertEqual(response.status_code, 401)
+        mock_investigate.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

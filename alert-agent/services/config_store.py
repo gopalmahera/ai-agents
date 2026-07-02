@@ -2,8 +2,12 @@
 
 Source of truth is the Redis hash ``config:store``. The local
 ``web_config.json`` file is a seed/mirror: it populates Redis on first
-boot (migration from older single-node setups) and keeps local dev
-working when Redis is down.
+boot (migration from older single-node setups) and lets reads and the
+boot-time apply keep working when Redis is briefly down.
+
+Writes REQUIRE Redis — if Redis is unavailable, ``update()`` raises
+``ConfigStoreUnavailable`` and the API returns 503 rather than accepting a
+local-only change that would be silently reverted when Redis recovers.
 
 Precedence: UI-stored value (Redis) > env var > built-in default.
 
@@ -17,8 +21,17 @@ from pathlib import Path
 
 import config as _cfg
 import services.store.redis_client as _redis
+from utils.fs import atomic_write_text
+from utils.log import get_logger
 
-_lock = threading.Lock()
+logger = get_logger(__name__)
+
+_lock = threading.RLock()
+
+
+class ConfigStoreUnavailable(RuntimeError):
+    """Raised when a config write cannot reach Redis (the source of truth)."""
+
 
 CONFIGURABLE_KEYS = [
     "AI_PROVIDER",
@@ -64,7 +77,7 @@ def _load_file() -> dict:
     try:
         return json.loads(p.read_text(encoding="utf-8"))
     except Exception as exc:
-        print(f"[config_store] Failed to load {p}: {exc}")
+        logger.warning("Failed to load config file", extra={"event": "config_file_error", "error": str(exc)})
         return {}
 
 
@@ -75,24 +88,66 @@ def _decode(raw: str):
         return raw
 
 
+def _load_store_redis() -> dict:
+    """Stored (UI-set) values from Redis. Raises if Redis is unreachable."""
+    raw = _redis.config_load()
+    return {k: _decode(v) for k, v in raw.items() if k in CONFIGURABLE_KEYS}
+
+
+def _load_store_file() -> dict:
+    """Stored values from the local file mirror (read fallback only)."""
+    return {k: v for k, v in _load_file().items() if k in CONFIGURABLE_KEYS}
+
+
 def _load_store() -> dict:
-    """Stored (UI-set) values — Redis first, local file when Redis is down."""
+    """Stored values for READ paths — Redis first, file mirror when Redis is down."""
     try:
-        raw = _redis.config_load()
-        return {k: _decode(v) for k, v in raw.items() if k in CONFIGURABLE_KEYS}
+        return _load_store_redis()
     except Exception:
-        return {k: v for k, v in _load_file().items() if k in CONFIGURABLE_KEYS}
+        return _load_store_file()
 
 
 def seed_redis_from_file() -> None:
-    """One-time migration: push web_config.json into Redis if the store is empty."""
-    stored = {k: v for k, v in _load_file().items() if k in CONFIGURABLE_KEYS}
-    if not stored:
-        return
-    if not _redis.config_is_empty():
-        return
-    _redis.config_save({k: json.dumps(v) for k, v in stored.items()})
-    print(f"[config_store] Seeded Redis config store from {_store_path()}")
+    """One-time migration: push local config/YAML into Redis when keys are empty.
+
+    Seeds the config:store hash from web_config.json and the routing/silences/
+    time-intervals YAML from their files. Bumps the version + publishes once so
+    already-running replicas pick up the seeded config.
+    """
+    seeded = False
+
+    stored = _load_store_file()
+    if stored and _redis.config_is_empty():
+        _redis.config_save({k: json.dumps(v) for k, v in stored.items()})
+        seeded = True
+        logger.info("Seeded Redis config store from file", extra={"event": "config_seed", "source": str(_store_path())})
+
+    for kind, path in _yaml_seed_sources().items():
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            if _redis.yaml_is_empty(kind):
+                text = Path(path).read_text(encoding="utf-8")
+                if text.strip():
+                    getattr(_redis, f"{kind}_yaml_save")(text)
+                    seeded = True
+                    logger.info("Seeded Redis YAML", extra={"event": "config_seed", "kind": kind, "source": path})
+        except Exception as exc:
+            logger.warning("YAML seed failed", extra={"event": "config_seed_error", "kind": kind, "error": str(exc)})
+
+    if seeded:
+        try:
+            _redis.publish_config_event("config")
+        except Exception:
+            pass
+
+
+def _yaml_seed_sources() -> dict[str, str]:
+    return {
+        "routing": _cfg.ROUTING_CONFIG_PATH or "",
+        "silences": os.getenv("SILENCES_CONFIG_PATH", "/app/config/silences.yaml"),
+        "time_intervals": os.getenv("TIME_INTERVALS_CONFIG_PATH", "/app/config/time_intervals.yaml"),
+    }
 
 
 def get_all() -> dict:
@@ -120,28 +175,30 @@ def get_masked() -> dict:
 
 
 def update(updates: dict) -> dict:
-    """Persist updates, notify other replicas, and apply to this process."""
+    """Persist updates to Redis (required), mirror to file, and apply locally.
+
+    Raises ConfigStoreUnavailable if Redis is unreachable — the caller returns
+    503 and nothing is written, so no local-only change can be silently
+    reverted when Redis recovers.
+    """
     accepted = {k: v for k, v in updates.items() if k in CONFIGURABLE_KEYS}
     if not accepted:
         return get_masked()
 
     with _lock:
-        # Shared store — other replicas pick this up via config:events
+        # Redis is the source of truth — write there first (atomic HSET+INCR+publish).
         try:
-            _redis.config_save({k: json.dumps(v) for k, v in accepted.items()})
-            _redis.publish_config_event("config")
+            _redis.config_save_and_publish({k: json.dumps(v) for k, v in accepted.items()})
         except Exception as exc:
-            print(f"[config_store] Redis unavailable — saved locally only: {exc}")
+            raise ConfigStoreUnavailable(str(exc)) from exc
 
-        # Local mirror: seeds Redis on cold start, fallback when Redis is down
+        # Mirror to the local file (seed/read fallback) — atomic, best-effort.
         stored = _load_file()
         stored.update(accepted)
-        p = _store_path()
         try:
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(json.dumps(stored, indent=2), encoding="utf-8")
+            atomic_write_text(str(_store_path()), json.dumps(stored, indent=2))
         except Exception as exc:
-            print(f"[config_store] Failed to write {p}: {exc}")
+            logger.warning("Failed to write config mirror", extra={"event": "config_file_error", "error": str(exc)})
 
         for key, value in accepted.items():
             _apply_live(key, value)
@@ -150,9 +207,21 @@ def update(updates: dict) -> dict:
 
 
 def apply_stored() -> None:
-    """Apply every stored value to this process (used by the sync thread)."""
-    for key, value in _load_store().items():
-        _apply_live(key, value)
+    """Apply every Redis-stored value to this process. Raises if Redis is down.
+
+    Used by the sync thread; raising lets the caller avoid advancing the applied
+    version when the data was not actually read from Redis.
+    """
+    with _lock:
+        for key, value in _load_store_redis().items():
+            _apply_live(key, value)
+
+
+def apply_from_file() -> None:
+    """Apply the local file mirror to this process (Redis-independent boot path)."""
+    with _lock:
+        for key, value in _load_store_file().items():
+            _apply_live(key, value)
 
 
 def _apply_live(key: str, value) -> None:
@@ -173,7 +242,10 @@ def _apply_live(key: str, value) -> None:
         try:
             cfg._allowed_alertname_pattern = re.compile(str_val) if str_val else None
         except re.error as exc:
-            print(f"[config_store] Invalid ALLOWED_ALERTNAMES regex {str_val!r}: {exc}")
+            logger.warning(
+                "Invalid ALLOWED_ALERTNAMES regex",
+                extra={"event": "config_regex_error", "error": str(exc)},
+            )
             return
         cfg.ALLOWED_ALERTNAMES = str_val
         os.environ[key] = str_val

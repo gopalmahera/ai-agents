@@ -148,6 +148,23 @@ def config_save(values: dict[str, str]) -> None:
         get().hset(_CONFIG_HASH, mapping=values)
 
 
+def config_save_and_publish(values: dict[str, str]) -> int:
+    """Atomically HSET config values and bump the version, then publish.
+
+    The HSET + INCR run in one pipeline so the version always reflects the
+    stored values (fixes the SET-succeeds/INCR-fails split). The PUBLISH is a
+    best-effort notification; the 30s version poll is the backstop if it drops.
+    """
+    pipe = get().pipeline()
+    if values:
+        pipe.hset(_CONFIG_HASH, mapping=values)
+    pipe.incr(_CONFIG_VERSION_KEY)
+    results = pipe.execute()
+    version = int(results[-1])
+    get().publish(EVENTS_CHANNEL, json.dumps({"kind": "config", "version": version}))
+    return version
+
+
 def config_is_empty() -> bool:
     return get().hlen(_CONFIG_HASH) == 0
 
@@ -168,6 +185,33 @@ def subscribe_events():
     pubsub = get().pubsub(ignore_subscribe_messages=True)
     pubsub.subscribe(EVENTS_CHANNEL)
     return pubsub
+
+
+_YAML_KEYS = {
+    "routing": _ROUTING_YAML_KEY,
+    "silences": _SILENCES_YAML_KEY,
+    "time_intervals": _TIME_INTERVALS_YAML_KEY,
+}
+
+
+def save_yaml_and_publish(kind: str, yaml_text: str) -> int:
+    """Atomically SET the YAML for ``kind`` and bump the version, then publish.
+
+    SET + INCR share one pipeline so the version always reflects the stored
+    YAML. Returns the new version. Raises if ``kind`` is unknown.
+    """
+    key = _YAML_KEYS[kind]
+    pipe = get().pipeline()
+    pipe.set(key, yaml_text)
+    pipe.incr(_CONFIG_VERSION_KEY)
+    results = pipe.execute()
+    version = int(results[-1])
+    get().publish(EVENTS_CHANNEL, json.dumps({"kind": kind, "version": version}))
+    return version
+
+
+def yaml_is_empty(kind: str) -> bool:
+    return not get().get(_YAML_KEYS[kind])
 
 
 def routing_yaml_load() -> str | None:

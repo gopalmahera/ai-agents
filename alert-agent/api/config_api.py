@@ -7,7 +7,8 @@ from flask import Blueprint, jsonify, request
 import config as _cfg
 import services.store.redis_client as _redis
 from api.auth import require_auth
-from services.config_store import get_masked, update
+from services.config_store import get_masked, update, ConfigStoreUnavailable
+from utils.fs import atomic_write_text
 from services.notification import routing as _routing
 from services.notification.routing_validation import validate_routing_body
 from services.notification import silences as _silences
@@ -16,6 +17,12 @@ from services.notification.silences_validation import validate_silences_body
 from services.notification.time_intervals_validation import validate_time_intervals_body
 
 bp = Blueprint("config_api", __name__, url_prefix="/api/config")
+
+_REDIS_DOWN_MSG = "Config store unavailable (Redis down); change not saved"
+
+
+def _redis_down(exc: Exception):
+    return jsonify({"error": f"{_REDIS_DOWN_MSG}: {exc}"}), 503
 
 # Internal MCP servers — run inside the agent container on fixed ports.
 # Read-only status; not configurable from the UI.
@@ -41,8 +48,13 @@ def get_config():
 @bp.post("")
 @require_auth
 def post_config():
-    body = request.get_json(silent=True) or {}
-    result = update(body)
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    try:
+        result = update(body)
+    except ConfigStoreUnavailable as exc:
+        return _redis_down(exc)
     return jsonify(result)
 
 
@@ -139,8 +151,10 @@ def get_routing():
 @bp.post("/routing")
 @require_auth
 def post_routing():
-    """Save routing rules to Redis and broadcast to all replicas."""
-    body = request.get_json(silent=True) or {}
+    """Save routing rules to Redis (source of truth) and broadcast to all replicas."""
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
     interval_names = _time_intervals_store.get_interval_names()
     errors = validate_routing_body(body, interval_names=interval_names)
     if errors:
@@ -148,31 +162,21 @@ def post_routing():
 
     yaml_text = yaml.safe_dump(body, default_flow_style=False, allow_unicode=True)
 
-    redis_ok = False
     try:
-        _redis.routing_yaml_save(yaml_text)
-        _redis.publish_config_event("routing")
-        redis_ok = True
+        _redis.save_yaml_and_publish("routing", yaml_text)
     except Exception as exc:
-        print(f"[config_api] Redis unavailable — routing saved to file only: {exc}")
+        return _redis_down(exc)
 
-    # Local file mirror (fallback when Redis is down; optional)
-    file_error = None
+    # Local file mirror (seed/read fallback) — atomic, best-effort.
     path = _cfg.ROUTING_CONFIG_PATH or ""
     if path:
         try:
-            import os
-            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(yaml_text)
+            atomic_write_text(path, yaml_text)
         except Exception as exc:
-            file_error = str(exc)
-
-    if not redis_ok and (not path or file_error):
-        return jsonify({"error": file_error or "Redis unavailable and no ROUTING_CONFIG_PATH set"}), 500
+            print(f"[config_api] Routing file mirror failed: {exc}")
 
     _routing.reset_cache()
-    return jsonify({"status": "ok", "synced": redis_ok})
+    return jsonify({"status": "ok"})
 
 
 @bp.get("/time-intervals")
@@ -194,6 +198,8 @@ def post_time_intervals():
         return jsonify({"error": "Validation failed", "details": errors}), 400
     try:
         _time_intervals_store.save_config(body)
+    except ConfigStoreUnavailable as exc:
+        return _redis_down(exc)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
     return jsonify({"status": "ok"})
@@ -218,6 +224,8 @@ def post_mute():
         return jsonify({"error": "Validation failed", "details": errors}), 400
     try:
         _silences.save_config(body)
+    except ConfigStoreUnavailable as exc:
+        return _redis_down(exc)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
     return jsonify({"status": "ok"})
@@ -247,7 +255,10 @@ def disable_silence(silence_id: str):
     errors = validate_silences_body(cfg, require_future_ends_at=False)
     if errors:
         return jsonify({"error": "Validation failed", "details": errors}), 400
-    _silences.save_config(cfg)
+    try:
+        _silences.save_config(cfg)
+    except ConfigStoreUnavailable as exc:
+        return _redis_down(exc)
     return jsonify({"status": "ok"})
 
 
@@ -280,5 +291,8 @@ def enable_silence(silence_id: str):
     errors = validate_silences_body(cfg)
     if errors:
         return jsonify({"error": "Validation failed", "details": errors}), 400
-    _silences.save_config(cfg)
+    try:
+        _silences.save_config(cfg)
+    except ConfigStoreUnavailable as exc:
+        return _redis_down(exc)
     return jsonify({"status": "ok"})
