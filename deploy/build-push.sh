@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REGISTRY="${REGISTRY:-414448255958.dkr.ecr.ap-south-1.amazonaws.com/monitoring}"
-IMAGE="${IMAGE:-ai-alert-agent}"
+IMAGE="${IMAGE:-dai-agent}"
 AWS_REGION="${AWS_REGION:-ap-south-1}"
 PLATFORM="${PLATFORM:-linux/amd64}"
 
@@ -37,6 +37,7 @@ docker build \
   --build-arg VCS_REF="${VCS_REF}" \
   -t "${IMAGE_URI}:${TAG}" \
   -t "${IMAGE_URI}:${VCS_REF}" \
+  -f Dockerfile.agent \
   .
 
 if [[ "${PUSH:-true}" == "true" ]]; then

@@ -23,8 +23,8 @@ ARG VERSION=dev
 ARG BUILD_DATE
 ARG VCS_REF
 
-LABEL org.opencontainers.image.title="ai-alert-agent" \
-      org.opencontainers.image.description="AI alert investigation agent with MCP tools" \
+LABEL org.opencontainers.image.title="dai-agent" \
+      org.opencontainers.image.description="Dozee Alert Intelligence (DAI) investigation agent with MCP tools" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}" \

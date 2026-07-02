@@ -1,6 +1,6 @@
-# AI Alert Agent — Project Summary for Management
+# Dozee Alert Intelligence (DAI) — Project Summary for Management
 
-**Project:** AI-Powered Alert Investigation Agent
+**Project:** Dozee Alert Intelligence (DAI)
 **Team:** Platform / Infrastructure
 **Last Updated:** July 2026
 
@@ -10,27 +10,21 @@
 
 When a production alert fires (e.g. a pod is consuming too much memory, a server is down, Kafka is lagging), the on-call engineer currently has to manually log into Grafana, Kubernetes, and Loki to find the root cause — often taking 15–30 minutes per alert.
 
-The **AI Alert Agent** automates this investigation. It receives the alert, queries all relevant systems in parallel using AI, and posts a structured Root Cause Analysis (RCA) directly to the team's Slack channel — in under 2 minutes.
+**DAI** automates this investigation. It receives the alert via the NestJS API, dispatches work to distributed investigation agents over WebSocket, queries all relevant systems in parallel using AI, and posts a structured Root Cause Analysis (RCA) directly to the team's Slack channel — in under 2 minutes.
 
 ---
 
 ## What We Built
 
-### Core System
+### Core platform (five services)
 
 | Component | What It Does |
 |---|---|
-| **Webhook Server** | Receives alerts from Alertmanager (the Prometheus alerting system) |
-| **AI Investigation Agent** | Configurable via `AI_PROVIDER` (openai / anthropic / gemini / bedrock); default model `gpt-4o`, `info`-severity alerts use `gpt-4o-mini` |
-| **Kubernetes Tool (k8s-mcp)** | Queries pod status, events, logs, deployment state |
-| **Prometheus Tool (prometheus-mcp)** | Queries CPU, memory, disk, network, probe, and node metrics |
-| **Loki Tool (loki-mcp)** | Queries application and infrastructure logs |
-| **Kafka Tool (kafka-mcp)** | Queries consumer lag, broker throughput, topic health |
-| **CloudWatch Tool (cloudwatch-mcp)** | Queries AWS CloudWatch metrics, alarms, and log events per environment |
-| **Slack Reporter** | Posts formatted RCA with color-coded severity to the right channel |
-| **Web Config Dashboard** | Next.js UI (port 3000) — config editor, endpoints/environments, routing, logs browser, reports, MCP/Redis health |
-
-Locally, three services run via `docker compose`: **alert-agent** (8080), **redis** (6379), and **web** (3000). The alert-agent container embeds five MCP servers and is backed by Redis for dedup, counters, and shared config.
+| **DAI API** (NestJS) | Webhook ingress, settings CRUD (Mongo), BullMQ job queue, Socket.IO gateway |
+| **DAI Web** (Next.js) | Admin UI — endpoints, environments, routing, silences, dashboard |
+| **DAI Agent** (Python) | Outbound WebSocket worker, LLM investigation, embedded MCP servers |
+| **MongoDB** | Settings persistence, alert event history, cost analytics |
+| **Redis** | Dedup, counters, BullMQ, Socket.IO adapter |
 
 ### Multi-Environment Endpoints (New)
 
@@ -51,8 +45,8 @@ The repo ships `config/alert_catalog.yaml` with **155 alert entries**, each with
 
 | Bucket | Approx. count | Source |
 |---|---|---|
-| Static rules (K8s, EC2, probe, TLS, throughput) | ~55 | Built-in catalog in `alert-agent/models/catalog.py` |
-| MSK-expanded (`msk.kb.*`, `msk.kbc.*`, nomessage) | ~100 | 20 topics × 5 patterns in `alert-agent/data/msk_topics.yaml` |
+| Static rules (K8s, EC2, probe, TLS, throughput) | ~55 | Built-in catalog in `apps/agent/models/catalog.py` |
+| MSK-expanded (`msk.kb.*`, `msk.kbc.*`, nomessage) | ~100 | 20 topics × 5 patterns in `apps/agent/data/msk_topics.yaml` |
 | **Total** | **155** | `config/alert_catalog.yaml` |
 
 **Alert types now covered:**
@@ -179,13 +173,13 @@ The agent exposes Prometheus metrics at `/metrics` and a Web UI stats API at `/a
 
 | Metric | What It Measures |
 |---|---|
-| `alert_agent_alerts_received_total` | Total alerts received per alert name |
-| `alert_agent_alerts_accepted_total` | Alerts that passed dedup and allowlist filters |
-| `alert_agent_alerts_skipped_total` | Alerts skipped (non-firing status or allowlist filter) |
-| `alert_agent_alerts_deduplicated_total` | Duplicate alerts suppressed |
-| `alert_agent_alerts_silenced_total` | Alerts suppressed by an active silence |
-| `alert_agent_llm_investigations_total` | LLM calls by outcome (success / fallback / error) |
-| `alert_agent_slack_posts_total` | Slack posts by outcome (success / error) |
+| `dai_alerts_received_total` | Total alerts received per alert name |
+| `dai_alerts_accepted_total` | Alerts that passed dedup and allowlist filters |
+| `dai_alerts_skipped_total` | Alerts skipped (non-firing status or allowlist filter) |
+| `dai_alerts_deduplicated_total` | Duplicate alerts suppressed |
+| `dai_alerts_silenced_total` | Alerts suppressed by an active silence |
+| `dai_llm_investigations_total` | LLM calls by outcome (success / fallback / error) |
+| `dai_slack_posts_total` | Slack posts by outcome (success / error) |
 
 Redis also stores the same counters for the Web UI dashboard and HA replicas.
 
@@ -213,13 +207,13 @@ Redis also stores the same counters for the Web UI dashboard and HA replicas.
 
 | Environment | Status |
 |---|---|
-| Local (docker-compose) | Running — alert-agent (8080) + redis (6379) + web (3000) |
+| Local (docker-compose) | Running — DAI api (4000) + web (3000) + agent (8080) + mongo + redis |
 | Kubernetes (dozee-dev) | Manifests ready |
 | Kubernetes (dozee-pro) | Manifests ready |
 
 **Local:** `docker compose` runs three services. Logs saved to a mounted volume (`/app/logs`). Catalog ships at `/app/config/alert_catalog.yaml` (volume-mounted in compose, baked into the container image for K8s).
 
-**Kubernetes:** `deploy/k8s/ai-alert-agent.yaml` includes the agent Deployment, logs PVC, **Redis Deployment + PVC + Service**, and `REDIS_URL` pointing at in-cluster Redis. No external queue.
+**Kubernetes:** Prefer [`infra/k8s/`](../infra/k8s/) (`dai-api`, `dai-web`, `dai-agent`, `dai-mongo`, `dai-redis`). Legacy monolithic manifest: `deploy/k8s/ai-alert-agent.yaml`.
 
 **HA:** Run 2+ agent replicas behind a load balancer with one shared Redis. Dedup, counters, config, routing, time intervals, and silences sync across replicas via Redis pub/sub (`config_sync.py`). Routing and runtime settings can be updated via the Web UI or `POST /api/config/routing` without restarting containers.
 

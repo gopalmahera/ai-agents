@@ -1,0 +1,103 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dai-agent
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dai-agent-role
+rules:
+  - apiGroups: ['']
+    resources: ['namespaces', 'pods', 'pods/log', 'pods/status', 'events']
+    verbs: ['get', 'list', 'watch']
+  - apiGroups: ['apps']
+    resources: ['deployments', 'replicasets']
+    verbs: ['get', 'list', 'watch']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dai-agent-role-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: dai-agent-role
+subjects:
+  - kind: ServiceAccount
+    name: dai-agent
+    namespace: monitoring
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dai-agent-catalog
+  namespace: monitoring
+data:
+  alert_catalog.yaml: |
+    # Seed alert catalog overrides
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dai-agent
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dai-agent
+  template:
+    metadata:
+      labels:
+        app: dai-agent
+    spec:
+      serviceAccountName: dai-agent
+      containers:
+        - name: agent
+          image: dai-agent:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: AGENT_ID
+              value: k8s-default
+            - name: API_WS_URL
+              value: http://dai-api:4000
+            - name: API_HTTP_URL
+              value: http://dai-api:4000
+            - name: REDIS_URL
+              value: redis://dai-redis:6379/0
+            - name: MONGO_URL
+              valueFrom:
+                secretKeyRef:
+                  name: dai-secrets
+                  key: mongo-url
+            - name: MONGO_DB
+              value: dai
+            - name: LOGS_DIR
+              value: /app/logs
+          volumeMounts:
+            - name: logs
+              mountPath: /app/logs
+            - name: config
+              mountPath: /app/config
+      volumes:
+        - name: logs
+          persistentVolumeClaim:
+            claimName: dai-logs
+        - name: config
+          configMap:
+            name: dai-agent-catalog
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dai-agent
+  namespace: monitoring
+spec:
+  selector:
+    app: dai-agent
+  ports:
+    - port: 8080
+      targetPort: 8080

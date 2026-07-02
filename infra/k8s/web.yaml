@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dai-web
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dai-web
+  template:
+    metadata:
+      labels:
+        app: dai-web
+    spec:
+      containers:
+        - name: web
+          image: dai-web:latest
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NEXT_PUBLIC_API_URL
+              value: http://dai-api:4000
+            - name: NEXT_PUBLIC_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: dai-secrets
+                  key: admin-token
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dai-web
+  namespace: monitoring
+spec:
+  selector:
+    app: dai-web
+  ports:
+    - port: 3000
+      targetPort: 3000

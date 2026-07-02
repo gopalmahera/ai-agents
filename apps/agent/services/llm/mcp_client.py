@@ -170,7 +170,7 @@ def _bedrock_assumed_role_model(severity: str | None = None):
         sts = boto3.client("sts", region_name=region)
         creds = sts.assume_role(
             RoleArn=_cfg.AWS_ROLE_ARN,
-            RoleSessionName="ai-alert-agent",
+            RoleSessionName="dai-agent",
         )["Credentials"]
         client = boto3.client(
             "bedrock-runtime",

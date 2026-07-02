@@ -1,0 +1,8 @@
+{
+  "name": "@dai/shared",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Shared types and validators for Dozee Alert Intelligence (DAI)",
+  "main": "src/types/index.ts",
+  "types": "src/types/index.ts"
+}

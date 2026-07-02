@@ -1,8 +1,9 @@
 ---
+# Legacy DAI (monolithic) manifest — prefer infra/k8s/ for new deployments
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: ai-alert-agent-catalog
+  name: dai-agent-catalog
   namespace: monitoring
 data:
   alert_catalog.yaml: |
@@ -15,7 +16,7 @@ data:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: ai-alert-agent
+  name: dai-agent
   namespace: monitoring
   # IRSA — for AWS Bedrock and/or the CloudWatch data source. Create an IAM role
   # with a trust policy for this ServiceAccount (via eksctl/IAM OIDC) granting:
@@ -26,13 +27,13 @@ metadata:
   # then set its ARN here. Per-environment AWS endpoints may also assume a
   # cross-account role (sts:AssumeRole) configured in Settings → Endpoint Mgmt.
   # annotations:
-  #   eks.amazonaws.com/role-arn: arn:aws:iam::414448255958:role/ai-alert-agent-bedrock
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::414448255958:role/dai-agent-bedrock
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: ai-alert-agent-role
+  name: dai-agent-role
 rules:
   - apiGroups: ['']
     resources: ['namespaces', 'pods', 'pods/log', 'pods/status', 'events']
@@ -45,21 +46,21 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: ai-alert-agent-role-binding
+  name: dai-agent-role-binding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: ai-alert-agent-role
+  name: dai-agent-role
 subjects:
   - kind: ServiceAccount
-    name: ai-alert-agent
+    name: dai-agent
     namespace: monitoring
 
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: ai-alert-agent-redis
+  name: dai-redis
   namespace: monitoring
 spec:
   accessModes:
@@ -72,17 +73,17 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ai-alert-agent-redis
+  name: dai-redis
   namespace: monitoring
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: ai-alert-agent-redis
+      app: dai-redis
   template:
     metadata:
       labels:
-        app: ai-alert-agent-redis
+        app: dai-redis
     spec:
       containers:
         - name: redis
@@ -114,13 +115,13 @@ spec:
       volumes:
         - name: redis-data
           persistentVolumeClaim:
-            claimName: ai-alert-agent-redis
+            claimName: dai-redis
 
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: ai-alert-agent-redis
+  name: dai-redis
   namespace: monitoring
 spec:
   type: ClusterIP
@@ -129,13 +130,13 @@ spec:
       targetPort: redis
       protocol: TCP
   selector:
-    app: ai-alert-agent-redis
+    app: dai-redis
 
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: ai-alert-agent-logs
+  name: dai-logs
   namespace: monitoring
 spec:
   accessModes:
@@ -148,7 +149,7 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ai-alert-agent
+  name: dai-agent
   namespace: monitoring
   annotations:
     reloader.stakater.com/auto: 'true'
@@ -156,16 +157,16 @@ spec:
   replicas: 1
   selector:
     matchLabels:
-      app: ai-alert-agent
+      app: dai-agent
   template:
     metadata:
       labels:
-        app: ai-alert-agent
+        app: dai-agent
     spec:
-      serviceAccountName: ai-alert-agent
+      serviceAccountName: dai-agent
       containers:
-        - name: ai-alert-agent
-          image: 414448255958.dkr.ecr.ap-south-1.amazonaws.com/prometheus/ai-alert-agent:1.0.1
+        - name: dai-agent
+          image: 414448255958.dkr.ecr.ap-south-1.amazonaws.com/monitoring/dai-agent:1.0.1
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
@@ -174,12 +175,12 @@ spec:
             - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: ai-alert-agent-secrets
+                  name: dai-secrets
                   key: openai-api-key
             - name: SLACK_WEBHOOK_URL
               valueFrom:
                 secretKeyRef:
-                  name: ai-alert-agent-secrets
+                  name: dai-secrets
                   key: slack-webhook-url
             - name: OPENAI_MODEL
               value: gpt-4o
@@ -194,7 +195,7 @@ spec:
             - name: ALERT_CATALOG_PATH
               value: /app/config/alert_catalog.yaml
             - name: REDIS_URL
-              value: redis://ai-alert-agent-redis.monitoring.svc.cluster.local:6379/0
+              value: redis://dai-redis.monitoring.svc.cluster.local:6379/0
             - name: INVESTIGATION_MAX_WORKERS
               value: '8'
             - name: AGENT_PORT
@@ -209,7 +210,7 @@ spec:
             # ── Optional: deployment-managed provider secrets ──────────────────
             # Prefer these over the Web UI if you don't want secrets stored in Redis.
             # - name: ANTHROPIC_API_KEY
-            #     valueFrom: { secretKeyRef: { name: ai-alert-agent-secrets, key: anthropic-api-key } }
+            #     valueFrom: { secretKeyRef: { name: dai-secrets, key: anthropic-api-key } }
             # Gemini (Vertex) via a mounted GCP service-account JSON:
             # - name: GOOGLE_GENAI_USE_VERTEXAI
             #   value: 'true'
@@ -242,7 +243,7 @@ spec:
             - name: logs
               mountPath: /app/logs
             # Gemini (Vertex) — mount a GCP SA-JSON Secret (create it separately):
-            #   kubectl -n monitoring create secret generic ai-alert-agent-gcp \
+            #   kubectl -n monitoring create secret generic dai-gcp \
             #     --from-file=key.json=/path/to/sa.json
             # - name: gcp-sa
             #   mountPath: /var/secrets/gcp
@@ -251,7 +252,7 @@ spec:
             # the agent can investigate alerts in other clusters (Environments →
             # kube_context). Each context authenticates to its own cluster (on
             # EKS, an `aws eks get-token` exec entry + IRSA/perms per cluster).
-            #   kubectl -n monitoring create secret generic ai-alert-agent-kubeconfig \
+            #   kubectl -n monitoring create secret generic dai-kubeconfig \
             #     --from-file=config=/path/to/multi-cluster-kubeconfig
             # - name: kubeconfig
             #   mountPath: /var/secrets/kube
@@ -259,19 +260,19 @@ spec:
       volumes:
         - name: logs
           persistentVolumeClaim:
-            claimName: ai-alert-agent-logs
+            claimName: dai-logs
         # - name: gcp-sa
         #   secret:
-        #     secretName: ai-alert-agent-gcp
+        #     secretName: dai-gcp
         # - name: kubeconfig
         #   secret:
-        #     secretName: ai-alert-agent-kubeconfig
+        #     secretName: dai-kubeconfig
 
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: ai-alert-agent
+  name: dai-agent
   namespace: monitoring
 spec:
   type: ClusterIP
@@ -280,4 +281,4 @@ spec:
       targetPort: http
       protocol: TCP
   selector:
-    app: ai-alert-agent
+    app: dai-agent

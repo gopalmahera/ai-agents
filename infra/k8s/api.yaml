@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dai-api
+  namespace: monitoring
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: dai-api
+  template:
+    metadata:
+      labels:
+        app: dai-api
+    spec:
+      containers:
+        - name: api
+          image: dai-api:latest
+          ports:
+            - containerPort: 4000
+          env:
+            - name: API_PORT
+              value: '4000'
+            - name: MONGO_URL
+              valueFrom:
+                secretKeyRef:
+                  name: dai-secrets
+                  key: mongo-url
+            - name: MONGO_DB
+              value: dai
+            - name: REDIS_URL
+              value: redis://dai-redis:6379/0
+            - name: BULLMQ_PREFIX
+              value: dai
+            - name: ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: dai-secrets
+                  key: admin-token
+            - name: LOGS_DIR
+              value: /app/logs
+          volumeMounts:
+            - name: logs
+              mountPath: /app/logs
+      volumes:
+        - name: logs
+          persistentVolumeClaim:
+            claimName: dai-logs
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dai-api
+  namespace: monitoring
+spec:
+  selector:
+    app: dai-api
+  ports:
+    - port: 4000
+      targetPort: 4000

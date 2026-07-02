@@ -1,0 +1,12 @@
+# Dev overrides — mount source for hot reload where supported
+services:
+  api:
+    volumes:
+      - ../../apps/api/src:/app/src
+      - ../../packages/shared:/packages/shared
+      - ../../logs:/app/logs
+      - ../../config:/app/config
+
+  web:
+    build:
+      target: deps

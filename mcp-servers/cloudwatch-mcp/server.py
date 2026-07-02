@@ -58,7 +58,7 @@ def _session():
         role_arn = _hdr("x-aws-role-arn")
         if role_arn:
             sts = boto3.client("sts", region_name=region)
-            creds = sts.assume_role(RoleArn=role_arn, RoleSessionName="ai-alert-agent-cw")["Credentials"]
+            creds = sts.assume_role(RoleArn=role_arn, RoleSessionName="dai-agent-cw")["Credentials"]
             return boto3.Session(
                 aws_access_key_id=creds["AccessKeyId"],
                 aws_secret_access_key=creds["SecretAccessKey"],

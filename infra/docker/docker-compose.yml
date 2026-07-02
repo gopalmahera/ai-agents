@@ -1,0 +1,103 @@
+services:
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save 60 1 --appendonly yes
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongo:
+    image: mongo:7
+    command: ['--quiet']
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - '4000:4000'
+    env_file:
+      - ../../.env
+    volumes:
+      - ../../logs:/app/logs
+      - ../../config:/app/config
+    environment:
+      API_PORT: '4000'
+      MONGO_URL: mongodb://mongo:27017
+      MONGO_DB: dai
+      REDIS_URL: redis://redis:6379/0
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      LOGS_DIR: /app/logs
+      CONFIG_ROOT: /app/config
+      BULLMQ_PREFIX: dai
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:4000
+        NEXT_PUBLIC_ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+    ports:
+      - '3000:3000'
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      NEXT_PUBLIC_ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+    depends_on:
+      - api
+
+  agent:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.agent
+      platforms:
+        - linux/amd64
+    platform: linux/amd64
+    env_file:
+      - ../../.env
+    volumes:
+      - ../../logs:/app/logs
+      - ../../config:/app/config
+    environment:
+      PROMETHEUS_URL: ${PROMETHEUS_URL}
+      LOKI_URL: ${LOKI_URL}
+      LOGS_DIR: /app/logs
+      REDIS_URL: redis://redis:6379/0
+      MONGO_URL: mongodb://mongo:27017
+      MONGO_DB: dai
+      AGENT_ID: ${AGENT_ID:-default}
+      AGENT_TOKEN: ${ADMIN_TOKEN:-}
+      API_WS_URL: http://api:4000
+      API_HTTP_URL: http://api:4000
+      AGENT_PORT: '8080'
+      ENABLE_FLASK_WEBHOOKS: 'false'
+    depends_on:
+      - api
+      - redis
+      - mongo
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+
+volumes:
+  redis_data:
+  mongo_data:
