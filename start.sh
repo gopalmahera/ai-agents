@@ -2,7 +2,7 @@
 set -e
 
 cleanup() {
-  kill "$K8S_PID" "$PROM_PID" "$LOKI_PID" "$KAFKA_PID" 2>/dev/null || true
+  kill "$K8S_PID" "$PROM_PID" "$LOKI_PID" "$KAFKA_PID" "$CW_PID" 2>/dev/null || true
 }
 
 trap cleanup EXIT INT TERM
@@ -44,15 +44,22 @@ MCP_HOST=0.0.0.0 MCP_PORT=8004 \
   python /app/mcp-servers/kafka-mcp/server.py &
 KAFKA_PID=$!
 
+MCP_HOST=0.0.0.0 MCP_PORT=8005 \
+  AWS_REGION="${AWS_REGION:-}" \
+  python /app/mcp-servers/cloudwatch-mcp/server.py &
+CW_PID=$!
+
 wait_for_port 127.0.0.1 8001 "k8s-mcp"
 wait_for_port 127.0.0.1 8002 "prometheus-mcp"
 wait_for_port 127.0.0.1 8003 "loki-mcp"
 wait_for_port 127.0.0.1 8004 "kafka-mcp"
+wait_for_port 127.0.0.1 8005 "cloudwatch-mcp"
 
 export K8S_MCP_URL="${K8S_MCP_URL:-http://127.0.0.1:8001/mcp}"
 export PROMETHEUS_MCP_URL="${PROMETHEUS_MCP_URL:-http://127.0.0.1:8002/mcp}"
 export LOKI_MCP_URL="${LOKI_MCP_URL:-http://127.0.0.1:8003/mcp}"
 export KAFKA_MCP_URL="${KAFKA_MCP_URL:-http://127.0.0.1:8004/mcp}"
+export CLOUDWATCH_MCP_URL="${CLOUDWATCH_MCP_URL:-http://127.0.0.1:8005/mcp}"
 
 cd /app/alert-agent
 exec gunicorn \

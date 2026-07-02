@@ -1,7 +1,17 @@
 export interface AgentConfig {
   AI_PROVIDER: string;
   OPENAI_MODEL: string;
+  OPENAI_MODEL_INFO?: string;
   OPENAI_API_KEY: string;
+  OPENAI_BASE_URL?: string;
+  ANTHROPIC_API_KEY?: string;
+  GEMINI_API_KEY?: string;
+  GOOGLE_SA_JSON?: string;
+  GOOGLE_CLOUD_PROJECT?: string;
+  GOOGLE_CLOUD_LOCATION?: string;
+  GOOGLE_GENAI_USE_VERTEXAI?: string;
+  AWS_REGION?: string;
+  AWS_ROLE_ARN?: string;
   LLM_ENABLED: boolean | string;
   SLACK_WEBHOOK_URL: string;
   PROMETHEUS_URL: string;
@@ -69,6 +79,49 @@ export interface RoutingRule {
   match_re?: Record<string, string>;
   slack_webhook_url: string;
   mute_time_intervals?: string[];
+}
+
+export type EndpointType = "prometheus" | "loki" | "kubernetes" | "aws";
+
+export interface EndpointAuth {
+  mode?: string; // http: none|basic|bearer ; aws: default|assume_role|keys
+  username?: string;
+  password?: string;
+  token?: string; // http bearer token
+  role_arn?: string;
+  access_key_id?: string;
+  secret_access_key?: string;
+}
+
+export interface Endpoint {
+  name: string;
+  type: EndpointType;
+  // prometheus / loki
+  url?: string;
+  // kubernetes
+  kube_context?: string;
+  api_server?: string;
+  token?: string;
+  ca_cert?: string;
+  // aws
+  region?: string;
+  auth?: EndpointAuth;
+}
+
+export interface EndpointsConfig {
+  endpoints: Endpoint[];
+}
+
+export interface Environment {
+  name: string;
+  prometheus?: string;
+  loki?: string;
+  kubernetes?: string;
+  aws?: string;
+}
+
+export interface EnvironmentsConfig {
+  environments: Environment[];
 }
 
 export interface TimeSlot {

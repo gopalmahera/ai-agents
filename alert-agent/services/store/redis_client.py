@@ -170,6 +170,8 @@ _CONFIG_VERSION_KEY = "config:version"
 _ROUTING_YAML_KEY = "config:routing_yaml"
 _SILENCES_YAML_KEY = "config:silences_yaml"
 _TIME_INTERVALS_YAML_KEY = "config:time_intervals_yaml"
+_ENVIRONMENTS_YAML_KEY = "config:environments_yaml"
+_ENDPOINTS_YAML_KEY = "config:endpoints_yaml"
 _MUTE_YAML_KEY = "config:mute_yaml"  # legacy — read-only migration
 EVENTS_CHANNEL = "config:events"
 
@@ -227,6 +229,8 @@ _YAML_KEYS = {
     "routing": _ROUTING_YAML_KEY,
     "silences": _SILENCES_YAML_KEY,
     "time_intervals": _TIME_INTERVALS_YAML_KEY,
+    "environments": _ENVIRONMENTS_YAML_KEY,
+    "endpoints": _ENDPOINTS_YAML_KEY,
 }
 
 
@@ -264,6 +268,22 @@ def silences_yaml_load() -> str | None:
 
 def silences_yaml_save(yaml_text: str) -> None:
     get().set(_SILENCES_YAML_KEY, yaml_text)
+
+
+def environments_yaml_load() -> str | None:
+    return get().get(_ENVIRONMENTS_YAML_KEY)
+
+
+def environments_yaml_save(yaml_text: str) -> None:
+    get().set(_ENVIRONMENTS_YAML_KEY, yaml_text)
+
+
+def endpoints_yaml_load() -> str | None:
+    return get().get(_ENDPOINTS_YAML_KEY)
+
+
+def endpoints_yaml_save(yaml_text: str) -> None:
+    get().set(_ENDPOINTS_YAML_KEY, yaml_text)
 
 
 def time_intervals_yaml_load() -> str | None:

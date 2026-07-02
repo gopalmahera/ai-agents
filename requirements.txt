@@ -9,3 +9,4 @@ prometheus_client
 pyyaml
 redis
 pymongo
+boto3

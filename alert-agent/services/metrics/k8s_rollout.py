@@ -1,28 +1,62 @@
 from __future__ import annotations
 
+import os
+import tempfile
 from datetime import datetime, timezone
 
-_apps_v1 = None
-_core_v1 = None
-_config_loaded = False
+# Clients cached per environment Kubernetes endpoint so different clusters reuse
+# their own connection. The key covers kube-context AND explicit api-server/token
+# so distinct endpoints never collide. Empty key = in-cluster / default kubeconfig.
+_clients_by_context: dict = {}
+
+
+def _explicit_api_client(client, kube):
+    """Build an ApiClient for an explicit api-server + bearer token (+ optional CA)."""
+    configuration = client.Configuration()
+    configuration.host = kube.api_server
+    configuration.api_key = {"authorization": kube.token}
+    configuration.api_key_prefix = {"authorization": "Bearer"}
+    if kube.ca_cert:
+        fd, path = tempfile.mkstemp(suffix=".pem")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(kube.ca_cert)
+        configuration.ssl_ca_cert = path
+    else:
+        configuration.verify_ssl = False
+    return client.ApiClient(configuration)
 
 
 def _ensure_k8s_clients():
-    global _apps_v1, _core_v1, _config_loaded
     from kubernetes import client, config
     from kubernetes.config.config_exception import ConfigException
+    from services import environments as _environments
 
-    if not _config_loaded:
+    kube = _environments.current().kubernetes
+    cache_key = (kube.kube_context, kube.api_server, kube.token, kube.ca_cert)
+    cached = _clients_by_context.get(cache_key)
+    if cached is not None:
+        return cached
+
+    if kube.explicit:
+        # Explicit api-server + token (e.g. a cross-cluster service-account token).
+        api_client = _explicit_api_client(client, kube)
+        core_v1 = client.CoreV1Api(api_client)
+        apps_v1 = client.AppsV1Api(api_client)
+    elif kube.kube_context:
+        # A named environment cluster from the mounted multi-context kubeconfig.
+        api_client = config.new_client_from_config(context=kube.kube_context)
+        core_v1 = client.CoreV1Api(api_client)
+        apps_v1 = client.AppsV1Api(api_client)
+    else:
         try:
             config.load_incluster_config()
         except ConfigException:
             config.load_kube_config()
-        _config_loaded = True
-    if _core_v1 is None:
-        _core_v1 = client.CoreV1Api()
-    if _apps_v1 is None:
-        _apps_v1 = client.AppsV1Api()
-    return _core_v1, _apps_v1
+        core_v1 = client.CoreV1Api()
+        apps_v1 = client.AppsV1Api()
+
+    _clients_by_context[cache_key] = (core_v1, apps_v1)
+    return core_v1, apps_v1
 
 
 def _format_age(created: datetime | None) -> str | None:

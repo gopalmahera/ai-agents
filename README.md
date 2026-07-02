@@ -121,8 +121,9 @@ Next.js dashboard (`web/`) for configuring and monitoring the agent without edit
 |---|---|
 | **Dashboard** | Stat cards (received / accepted / deduplicated / silenced / LLM outcomes), MCP + Redis health |
 | **Config → AI Provider** | Provider (`openai` / `anthropic` / `gemini` / `bedrock` / `fake`), model, API key, LLM on/off |
-| **Config → Service Endpoints** | Direct data-source endpoints (`PROMETHEUS_URL`, `LOKI_URL`) with health checks; read-only status of the internal MCP servers |
 | **Config → Storage** | Logs dir, dedup TTL, allowed alertnames regex, catalog/routing paths |
+| **Settings → Endpoint Management** | Reusable named endpoints (Prometheus / Loki / Kubernetes / AWS) each with its own auth — see below |
+| **Settings → Environments** | Named environments that select endpoints by dropdown and expose a per-env webhook path — see below |
 | **Routing** | Visual editor for `routing.yaml` rules |
 | **Time Intervals** | Named schedules for routing mute windows (Alertmanager-style) |
 | **Silences** | Silence rules that skip LLM + Slack for matching alerts |
@@ -131,16 +132,70 @@ Next.js dashboard (`web/`) for configuring and monitoring the agent without edit
 
 Changes are saved to the shared Redis store (hash `config:store`), mirrored to `config/web_config.json`, and applied to every running agent replica within seconds — no restart needed. Precedence: **UI-stored value > env var > built-in default** (env vars act as initial defaults; anything set from the UI wins until cleared).
 
-MCP server URLs are **not** configurable — the MCP servers run inside the agent container on fixed localhost ports (8001-8004) and are shown as read-only status only.
+MCP server URLs are **not** configurable — the MCP servers run inside the agent container on fixed localhost ports (8001-8005, including the CloudWatch server) and are shown as read-only status only.
 
 **Auth:** set `ADMIN_TOKEN` to require `Authorization: Bearer <token>` on all `/api/*` endpoints. If unset, auth is skipped (dev mode).
+
+### AI Provider Authentication
+
+The **Config → AI Provider** page shows credential fields for the selected provider. Credentials entered there are stored (masked) in the Redis config store and synced to every replica. Under the hood the agent builds a pydantic-ai model string per provider and the SDKs read credentials from environment variables — so anything you can set as an env var / K8s Secret also works without the UI.
+
+| Provider | What to configure | Auth mechanism |
+|---|---|---|
+| **OpenAI** | API key, model, optional **Base URL** | `OPENAI_API_KEY` (+ `OPENAI_BASE_URL` for **Azure OpenAI** / a proxy) |
+| **Anthropic** | API key, model | `ANTHROPIC_API_KEY` |
+| **Gemini (Vertex)** | GCP project, location, **service-account JSON** | SA JSON is materialised to `config/gcp-sa.json` and `GOOGLE_APPLICATION_CREDENTIALS` points at it; `GOOGLE_GENAI_USE_VERTEXAI=true` |
+| **Gemini (GLA)** | API key | `GEMINI_API_KEY` (toggle "Use Vertex AI" off) |
+| **AWS Bedrock** | region, model, optional role ARN | **IRSA** — the pod's IAM role (no key). Annotate the ServiceAccount with `eks.amazonaws.com/role-arn` |
+
+**On EKS:**
+- **Bedrock** needs the pod's ServiceAccount annotated with an IAM role (`eks.amazonaws.com/role-arn`) granting `bedrock:InvokeModel`. This is deployment-level — a role isn't a text secret. Set `AWS_REGION`; optionally set an **Assume Role ARN** in the UI for cross-account access. Tip: run **Claude via Bedrock** (`us.anthropic.claude-*`) to avoid managing an Anthropic key.
+- **Gemini** can use the UI-pasted SA JSON, or a K8s Secret mounted as a file with `GOOGLE_APPLICATION_CREDENTIALS` (commented example in `deploy/k8s/ai-alert-agent.yaml`). A keyless **GCP Workload Identity Federation** setup (EKS OIDC → GCP) is the IRSA-equivalent if you'd rather not store an SA key.
+
+Secrets set in the UI persist in Redis (AOF) — keep Redis network-isolated, or use the deployment-managed env/Secret path for stricter environments.
+
+### Multi-Environment Endpoints
+
+Run one agent across many environments (e.g. prod, sit) with a **reusable endpoint registry** plus **environments** that reference it. Both are managed under **Settings**.
+
+**Endpoint Management** — named, reusable endpoints, each with its own auth:
+
+| Type | Connection | Auth |
+|---|---|---|
+| **Prometheus / Loki** | `url` | `none` \| `basic` (user/pass) \| `bearer` (token) |
+| **Kubernetes** | `kube_context` from a mounted multi-context kubeconfig, **or** `api_server` + `token` (+ optional `ca_cert`) | in-cluster / kubeconfig / explicit bearer token |
+| **AWS (Cloud)** | `region` | `default` (IRSA / pod role) \| `assume_role` (role ARN) \| `keys` (access key + secret) — powers the **CloudWatch** metrics/logs tools |
+
+**Environments** — each picks one endpoint per source from a dropdown and maps to a webhook path:
+
+```yaml
+environments:
+  - name: default          # bare /webhook uses this one
+    prometheus: prod-prometheus
+    loki: prod-loki
+    kubernetes: prod-k8s
+    aws: prod-aws           # optional — enables the CloudWatch tools for this env
+  - name: sit
+    prometheus: sit-prometheus
+    loki: sit-loki
+    kubernetes: sit-k8s
+```
+
+Point each cluster's Alertmanager at **`POST /webhook/<env>`** (bare `/webhook` uses the `default` environment). The resolved endpoints drive **both** query paths — the direct Prometheus prefetch and the MCP tools (Prometheus, Loki, Kafka, Kubernetes, CloudWatch). The agent injects the URL **and auth** per investigation via HTTP headers (`X-Prometheus-Url` / `X-Prometheus-Authorization`, `X-Loki-Url` / `X-Loki-Authorization`, `X-Kube-Context` or `X-Kube-Api-Server`/`X-Kube-Token`/`X-Kube-Ca-Cert`, and `X-Aws-*`), so one set of MCP servers serves every environment; an unset source falls back to the boot defaults.
+
+- **Kubernetes** — a `kube_context` selects a context from a mounted **multi-context kubeconfig** (a K8s Secret; see `deploy/k8s/ai-alert-agent.yaml`); or connect explicitly with an API server + service-account token. `""` = local in-cluster credentials.
+- **AWS / CloudWatch** — the CloudWatch MCP server (in-container, port 8005) queries metrics/logs using the environment's AWS endpoint; grant the pod role (or the assumed role) `cloudwatch:*`/`logs:*` read permissions.
+
+Endpoints and environments save to Redis (`config:endpoints_yaml`, `config:environments_yaml`) and sync to all replicas — no restart. Endpoint secrets are stored masked (`***`) and preserved across edits.
 
 ### API Endpoints
 
 ```
 GET/POST /api/config                  read / update config (sensitive keys masked)
-GET      /api/config/mcp/health       health of the 4 MCP servers
+GET      /api/config/mcp/health       health of the 5 internal MCP servers
 GET      /api/config/services/health  health of Prometheus / Loki direct endpoints
+GET/POST /api/config/endpoints        named endpoint registry as JSON (secrets masked)
+GET/POST /api/config/environments     environment → endpoint-ref map as JSON
 GET/POST /api/config/routing          routing.yaml as JSON
 GET/POST /api/config/time-intervals     named time intervals as JSON
 GET/POST /api/config/mute             silences (active + disabled) as JSON
@@ -150,8 +205,8 @@ GET      /api/metrics/stats           counters from Redis
 GET      /api/reports/summary?days=7  aggregated alert history from Redis stream
 GET      /api/logs, /api/logs/{name}  log file browser
 GET      /api/redis/health            Redis availability
-POST     /webhook/test                 synchronous RCA test (no Slack post)
-POST     /webhook                      Alertmanager webhook intake
+POST     /webhook/test                 synchronous RCA test (no Slack post; ?env=<name>)
+POST     /webhook, /webhook/<env>      Alertmanager webhook intake (per-environment path)
 GET      /metrics                      Prometheus metrics scrape endpoint
 ```
 

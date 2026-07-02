@@ -89,6 +89,27 @@ class TestAppWebhook(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
         mock_investigate.assert_not_called()
 
+    @patch.object(webhook_controller, "log_incoming_payload")
+    @patch.object(webhook_controller, "_redis")
+    @patch.object(webhook_controller, "_get_executor")
+    def test_webhook_env_threads_environment(self, mock_executor, mock_redis, _mock_log):
+        mock_redis.dedup_check_and_set.return_value = False
+        mock_executor.return_value = MagicMock()
+        response = self.client.post("/webhook/prod", json=FIRING_WEBHOOK)
+        self.assertEqual(response.status_code, 200)
+        submit = mock_executor.return_value.submit
+        submit.assert_called_once()
+        # submit(_investigate_in_background, alert, env) — env threaded from the path.
+        self.assertEqual(submit.call_args.args[2], "prod")
+
+    def test_webhook_test_not_shadowed_by_env_route(self):
+        # POST /webhook/test hits the (auth-gated) test route, not /webhook/<env>.
+        with patch.object(webhook_controller, "investigate_alert", return_value={"rca": "x"}) as mock_inv:
+            response = self.client.post("/webhook/test", json=FIRING_WEBHOOK)
+        self.assertEqual(response.status_code, 200)
+        mock_inv.assert_called_once()
+        self.assertNotEqual(mock_inv.call_args.kwargs.get("env"), "test")
+
 
 if __name__ == "__main__":
     unittest.main()

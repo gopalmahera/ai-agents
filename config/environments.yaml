@@ -1,0 +1,18 @@
+# Environments map a webhook path (/webhook/<name>) to named endpoints from the
+# registry (config/endpoints.yaml). Managed from the Web UI (Settings →
+# Environments); this file seeds Redis on first boot only when the map is empty.
+#
+# Point each cluster's Alertmanager at its own /webhook/<name>. A bare /webhook
+# (no environment) uses the environment named "default". Example:
+#
+# environments:
+#   - name: default
+#     prometheus: prod-prometheus
+#     loki: prod-loki
+#     kubernetes: prod-k8s
+#     aws: prod-aws                # optional — enables the CloudWatch tools
+#   - name: sit
+#     prometheus: sit-prometheus
+#     loki: sit-loki
+#     kubernetes: sit-k8s
+environments: []

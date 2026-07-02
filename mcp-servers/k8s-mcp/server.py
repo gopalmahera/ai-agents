@@ -1,3 +1,5 @@
+import base64
+import contextvars
 import json
 import os
 import tempfile
@@ -6,6 +8,26 @@ from kubernetes import client, config
 from kubernetes.config.config_exception import ConfigException
 from mcp.server.fastmcp import FastMCP
 import yaml
+
+# Per-request header capture: the agent injects the alert's environment cluster
+# via X-Kube-Context; requests without it use the boot default / in-cluster.
+_req_headers: contextvars.ContextVar = contextvars.ContextVar("req_headers", default=None)
+
+
+class _HeaderCaptureMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http":
+            hdrs = {k.decode("latin1").lower(): v.decode("latin1") for k, v in (scope.get("headers") or [])}
+            token = _req_headers.set(hdrs)
+            try:
+                await self.app(scope, receive, send)
+            finally:
+                _req_headers.reset(token)
+        else:
+            await self.app(scope, receive, send)
 
 
 def _normalize_kubeconfig(kubeconfig: str) -> str:
@@ -85,8 +107,85 @@ class _UnavailableApi:
         return _noop
 
 
-core_v1 = client.CoreV1Api() if _K8S_AVAILABLE else _UnavailableApi()
-apps_v1 = client.AppsV1Api() if _K8S_AVAILABLE else _UnavailableApi()
+# Kubernetes clients cached per environment endpoint. The key covers the
+# kube-context AND explicit api-server/token/CA so distinct endpoints never
+# collide. "" context with no explicit creds = boot default (in-cluster/KUBECONTEXT).
+_clients_by_context: dict = {}
+
+
+def _request_kube_key() -> tuple:
+    h = _req_headers.get() or {}
+    return (
+        h.get("x-kube-context") or "",
+        h.get("x-kube-api-server") or "",
+        h.get("x-kube-token") or "",
+        h.get("x-kube-ca-cert") or "",  # base64-encoded PEM
+    )
+
+
+def _explicit_api_client(api_server: str, token: str, ca_b64: str):
+    configuration = client.Configuration()
+    configuration.host = api_server
+    configuration.api_key = {"authorization": token}
+    configuration.api_key_prefix = {"authorization": "Bearer"}
+    if ca_b64:
+        pem = base64.b64decode(ca_b64).decode("utf-8")
+        fd, path = tempfile.mkstemp(suffix=".pem")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(pem)
+        configuration.ssl_ca_cert = path
+    else:
+        configuration.verify_ssl = False
+    return client.ApiClient(configuration)
+
+
+def _clients_for_key(key: tuple):
+    cached = _clients_by_context.get(key)
+    if cached is not None:
+        return cached
+
+    ctx, api_server, token, ca_b64 = key
+    if api_server and token:
+        # Explicit api-server + bearer token — works even without a boot kubeconfig.
+        try:
+            api_client = _explicit_api_client(api_server, token, ca_b64)
+            pair = (client.CoreV1Api(api_client), client.AppsV1Api(api_client))
+        except Exception as exc:
+            print(f"[k8s-mcp] explicit api-server {api_server!r} unavailable: {exc}")
+            pair = (_UnavailableApi(), _UnavailableApi())
+    elif not _K8S_AVAILABLE:
+        pair = (_UnavailableApi(), _UnavailableApi())
+    elif not ctx:
+        pair = (client.CoreV1Api(), client.AppsV1Api())
+    else:
+        try:
+            kubeconfig = os.getenv("KUBECONFIG")
+            if kubeconfig:
+                kubeconfig = _normalize_kubeconfig(kubeconfig)
+                api_client = config.new_client_from_config(config_file=kubeconfig, context=ctx)
+            else:
+                api_client = config.new_client_from_config(context=ctx)
+            pair = (client.CoreV1Api(api_client), client.AppsV1Api(api_client))
+        except Exception as exc:
+            print(f"[k8s-mcp] kube-context {ctx!r} unavailable: {exc}")
+            pair = (_UnavailableApi(), _UnavailableApi())
+
+    _clients_by_context[key] = pair
+    return pair
+
+
+class _ContextualApi:
+    """Dispatches every call to the client for the request's Kubernetes endpoint
+    (X-Kube-Context, or explicit X-Kube-Api-Server + X-Kube-Token + X-Kube-Ca-Cert)."""
+    def __init__(self, index: int):
+        self._index = index
+
+    def __getattr__(self, name):
+        return getattr(_clients_for_key(_request_kube_key())[self._index], name)
+
+
+core_v1 = _ContextualApi(0)
+apps_v1 = _ContextualApi(1)
 
 mcp = FastMCP(
     "kubernetes",
@@ -410,5 +509,18 @@ def get_workload_rollout_info(namespace: str, pod_name: str, container: str | No
     }
 
 
+def _run() -> None:
+    import uvicorn
+
+    app = mcp.streamable_http_app()
+    app.add_middleware(_HeaderCaptureMiddleware)
+    uvicorn.run(
+        app,
+        host=os.getenv("MCP_HOST", "0.0.0.0"),
+        port=int(os.getenv("MCP_PORT", "8000")),
+        log_level=os.getenv("MCP_LOG_LEVEL", "info"),
+    )
+
+
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http")
+    _run()

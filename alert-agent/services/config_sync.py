@@ -37,6 +37,7 @@ def _apply(version: int) -> None:
     _reset_routing_cache()
     _reset_mute_cache()
     _reset_time_intervals_cache()
+    _reset_environments_cache()
     _applied_version = version
     logger.info("Applied shared config", extra={"event": "config_sync", "version": version})
 
@@ -61,6 +62,14 @@ def _reset_time_intervals_cache() -> None:
     try:
         from services.notification import time_intervals_store
         time_intervals_store.reset_cache()
+    except Exception:
+        pass
+
+
+def _reset_environments_cache() -> None:
+    try:
+        from services import environments
+        environments.reset_cache()
     except Exception:
         pass
 

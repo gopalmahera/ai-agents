@@ -1,3 +1,4 @@
+import base64
 from pathlib import Path
 
 from pydantic_ai import Agent
@@ -13,6 +14,7 @@ from config import (
     PROMETHEUS_MCP_URL,
 )
 from services.metrics.prefetch import prefetched_to_prompt_block
+from services import environments as _environments
 import services.store.redis_client as _redis
 from utils.log import get_logger
 
@@ -21,17 +23,69 @@ logger = get_logger(__name__)
 PROMPT_PATH = Path(__file__).parents[2] / "prompts" / "rca_prompt.txt"
 
 
-def _mcp(url: str, prefix: str):
-    return MCPToolset(FastMCPClient(transport=StreamableHttpTransport(url))).prefixed(prefix)
+def _mcp(url: str, prefix: str, headers: dict | None = None):
+    transport = StreamableHttpTransport(url, headers=headers or None)
+    return MCPToolset(FastMCPClient(transport=transport)).prefixed(prefix)
+
+
+def _http_headers(url_header: str, auth_header: str, ep) -> dict | None:
+    headers: dict[str, str] = {}
+    if ep.url:
+        headers[url_header] = ep.url
+    auth = ep.auth.header_value()
+    if auth:
+        headers[auth_header] = auth
+    return headers or None
+
+
+def _kube_headers(kube) -> dict | None:
+    headers: dict[str, str] = {}
+    if kube.kube_context:
+        headers["X-Kube-Context"] = kube.kube_context
+    if kube.explicit:
+        headers["X-Kube-Api-Server"] = kube.api_server
+        headers["X-Kube-Token"] = kube.token
+        if kube.ca_cert:
+            headers["X-Kube-Ca-Cert"] = base64.b64encode(kube.ca_cert.encode("utf-8")).decode("ascii")
+    return headers or None
+
+
+def _aws_headers(aws) -> dict:
+    headers = {"X-Aws-Auth-Mode": aws.mode or "default"}
+    if aws.region:
+        headers["X-Aws-Region"] = aws.region
+    if aws.mode == "assume_role" and aws.role_arn:
+        headers["X-Aws-Role-Arn"] = aws.role_arn
+    if aws.mode == "keys":
+        if aws.access_key_id:
+            headers["X-Aws-Access-Key-Id"] = aws.access_key_id
+        if aws.secret_access_key:
+            headers["X-Aws-Secret-Access-Key"] = aws.secret_access_key
+    return headers
 
 
 def _build_toolsets():
-    return [
-        _mcp(_cfg.K8S_MCP_URL, "k8s"),
-        _mcp(_cfg.PROMETHEUS_MCP_URL, "prom"),
-        _mcp(_cfg.LOKI_MCP_URL, "loki"),
-        _mcp(_cfg.KAFKA_MCP_URL, "kafka"),
+    # Route each MCP server to the alert's environment endpoints (URL + auth) via
+    # per-request headers; the servers fall back to their boot defaults / default
+    # credential chain when a header is absent.
+    env = _environments.current()
+    prom_headers = _http_headers("X-Prometheus-Url", "X-Prometheus-Authorization", env.prometheus)
+    loki_headers = _http_headers("X-Loki-Url", "X-Loki-Authorization", env.loki)
+    k8s_headers = _kube_headers(env.kubernetes)
+
+    toolsets = [
+        _mcp(_cfg.K8S_MCP_URL, "k8s", k8s_headers),
+        _mcp(_cfg.PROMETHEUS_MCP_URL, "prom", prom_headers),
+        _mcp(_cfg.LOKI_MCP_URL, "loki", loki_headers),
+        _mcp(_cfg.KAFKA_MCP_URL, "kafka", prom_headers),
     ]
+
+    # CloudWatch is only wired when the environment selects an AWS endpoint and
+    # the server is configured — keeps AWS-less environments unchanged.
+    cw_url = getattr(_cfg, "CLOUDWATCH_MCP_URL", "")
+    if cw_url and env.aws is not None:
+        toolsets.append(_mcp(cw_url, "cw", _aws_headers(env.aws)))
+    return toolsets
 
 
 def _selected_model(severity: str | None = None) -> str:
@@ -101,9 +155,53 @@ def _record_usage(severity: str | None, result) -> dict | None:
         return None
 
 
+def _bedrock_assumed_role_model(severity: str | None = None):
+    """Build a Bedrock model backed by an assumed IAM role.
+
+    Returns None on any failure so the caller falls back to the plain
+    `bedrock:{model}` string (ambient IRSA / default credential chain).
+    """
+    try:
+        import boto3
+        from pydantic_ai.models.bedrock import BedrockConverseModel
+        from pydantic_ai.providers.bedrock import BedrockProvider
+
+        region = getattr(_cfg, "AWS_REGION", "") or None
+        sts = boto3.client("sts", region_name=region)
+        creds = sts.assume_role(
+            RoleArn=_cfg.AWS_ROLE_ARN,
+            RoleSessionName="ai-alert-agent",
+        )["Credentials"]
+        client = boto3.client(
+            "bedrock-runtime",
+            region_name=region,
+            aws_access_key_id=creds["AccessKeyId"],
+            aws_secret_access_key=creds["SecretAccessKey"],
+            aws_session_token=creds["SessionToken"],
+        )
+        return BedrockConverseModel(_selected_model(severity), provider=BedrockProvider(bedrock_client=client))
+    except Exception as exc:
+        logger.warning(
+            "Bedrock assume-role failed; using default credential chain",
+            extra={"event": "bedrock_assume_role_error", "error": str(exc)},
+        )
+        return None
+
+
+def _resolve_model(severity: str | None = None):
+    """Model string for every provider, except Bedrock cross-account assume-role
+    which needs an explicit provider object."""
+    provider = getattr(_cfg, "AI_PROVIDER", "openai")
+    if provider == "bedrock" and getattr(_cfg, "AWS_ROLE_ARN", ""):
+        model = _bedrock_assumed_role_model(severity)
+        if model is not None:
+            return model
+    return _model_string(severity)
+
+
 def create_agent(severity: str | None = None) -> Agent:
     return Agent(
-        _model_string(severity),
+        _resolve_model(severity),
         instructions=PROMPT_PATH.read_text(),
         output_type=str,
         toolsets=_build_toolsets(),

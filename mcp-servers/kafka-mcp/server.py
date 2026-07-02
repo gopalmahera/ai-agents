@@ -1,3 +1,4 @@
+import contextvars
 import os
 import re
 
@@ -15,16 +16,49 @@ mcp = FastMCP(
 PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://prometheus-sit.dozee.int")
 _TIMEOUT = int(os.getenv("MCP_SOCKET_TIMEOUT", "30"))
 
+# Per-request header capture: the agent injects the alert's environment endpoint
+# via X-Prometheus-Url; each request falls back to the boot default if absent.
+_req_headers: contextvars.ContextVar = contextvars.ContextVar("req_headers", default=None)
+
+
+class _HeaderCaptureMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http":
+            hdrs = {k.decode("latin1").lower(): v.decode("latin1") for k, v in (scope.get("headers") or [])}
+            token = _req_headers.set(hdrs)
+            try:
+                await self.app(scope, receive, send)
+            finally:
+                _req_headers.reset(token)
+        else:
+            await self.app(scope, receive, send)
+
+
+def _base_url() -> str:
+    return (_req_headers.get() or {}).get("x-prometheus-url") or PROMETHEUS_URL
+
+
+def _auth_header() -> dict:
+    # The agent injects a ready-to-use Authorization value for the env's endpoint.
+    auth = (_req_headers.get() or {}).get("x-prometheus-authorization")
+    return {"Authorization": auth} if auth else {}
+
+
+def _get(url: str, **kwargs):
+    headers = kwargs.pop("headers", None) or {}
+    headers.update(_auth_header())
+    return requests.get(url, headers=headers or None, timeout=_TIMEOUT, **kwargs)
+
+
 _MSK_LAG_RE = re.compile(r"^msk\.(kbc|kb)\.(.+?)\s*>\s*\d+")
 _MSK_NOMESSAGE_RE = re.compile(r"^msk\.(kbc|kb)\.nomessage\.(.+?)\s*=\s*0")
 
 
 def _query(query: str):
-    response = requests.get(
-        f"{PROMETHEUS_URL}/api/v1/query",
-        params={"query": query},
-        timeout=_TIMEOUT,
-    )
+    response = _get(f"{_base_url()}/api/v1/query", params={"query": query})
     response.raise_for_status()
     return response.json()
 
@@ -130,10 +164,7 @@ def get_topic_message_rate(
 @mcp.tool()
 def list_kafka_jobs():
     """List Prometheus job label values related to MSK/Kafka scrapes."""
-    payload = requests.get(
-        f"{PROMETHEUS_URL}/api/v1/label/job/values",
-        timeout=_TIMEOUT,
-    )
+    payload = _get(f"{_base_url()}/api/v1/label/job/values")
     payload.raise_for_status()
     jobs = payload.json().get("data", [])
     return [job for job in jobs if "msk" in job or "kafka" in job]
@@ -142,10 +173,7 @@ def list_kafka_jobs():
 @mcp.tool()
 def list_active_msk_alerts():
     """List active Prometheus alerts with alertname starting with msk."""
-    response = requests.get(
-        f"{PROMETHEUS_URL}/api/v1/alerts",
-        timeout=_TIMEOUT,
-    )
+    response = _get(f"{_base_url()}/api/v1/alerts")
     response.raise_for_status()
     payload = response.json()
     alerts = payload.get("data", {}).get("alerts", [])
@@ -183,5 +211,18 @@ def get_broker_throughput(topic: str, job: str | None = None):
     }
 
 
+def _run() -> None:
+    import uvicorn
+
+    app = mcp.streamable_http_app()
+    app.add_middleware(_HeaderCaptureMiddleware)
+    uvicorn.run(
+        app,
+        host=os.getenv("MCP_HOST", "0.0.0.0"),
+        port=int(os.getenv("MCP_PORT", "8000")),
+        log_level=os.getenv("MCP_LOG_LEVEL", "info"),
+    )
+
+
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http")
+    _run()

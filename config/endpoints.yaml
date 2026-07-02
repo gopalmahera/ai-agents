@@ -1,0 +1,24 @@
+# Named endpoint registry (Prometheus / Loki / Kubernetes / AWS) referenced by
+# environments. Managed from the Web UI (Settings → Endpoint Management); this
+# file seeds Redis on first boot only when the registry is empty.
+#
+# Secrets (passwords, tokens, AWS secret keys, k8s tokens) can live here for a
+# file-only deploy, but the UI stores them in Redis (masked). Example:
+#
+# endpoints:
+#   - name: prod-prometheus
+#     type: prometheus
+#     url: http://prometheus-prod.internal:9090
+#     auth: { mode: bearer, token: "..." }       # mode: none | basic | bearer
+#   - name: prod-loki
+#     type: loki
+#     url: http://loki-prod.internal:3100
+#     auth: { mode: basic, username: svc, password: "..." }
+#   - name: prod-k8s
+#     type: kubernetes
+#     kube_context: prod-ap-south-1              # OR: api_server + token + ca_cert
+#   - name: prod-aws
+#     type: aws
+#     region: ap-south-1
+#     auth: { mode: assume_role, role_arn: "arn:aws:iam::123456789012:role/cloudwatch-read" }
+endpoints: []

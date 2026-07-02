@@ -26,10 +26,15 @@ The **AI Alert Agent** automates this investigation. It receives the alert, quer
 | **Prometheus Tool (prometheus-mcp)** | Queries CPU, memory, disk, network, probe, and node metrics |
 | **Loki Tool (loki-mcp)** | Queries application and infrastructure logs |
 | **Kafka Tool (kafka-mcp)** | Queries consumer lag, broker throughput, topic health |
+| **CloudWatch Tool (cloudwatch-mcp)** | Queries AWS CloudWatch metrics, alarms, and log events per environment |
 | **Slack Reporter** | Posts formatted RCA with color-coded severity to the right channel |
-| **Web Config Dashboard** | Next.js UI (port 3000) — config editor, routing, logs browser, reports, MCP/Redis health |
+| **Web Config Dashboard** | Next.js UI (port 3000) — config editor, endpoints/environments, routing, logs browser, reports, MCP/Redis health |
 
-Locally, three services run via `docker compose`: **alert-agent** (8080), **redis** (6379), and **web** (3000). The alert-agent container embeds four MCP servers and is backed by Redis for dedup, counters, and shared config.
+Locally, three services run via `docker compose`: **alert-agent** (8080), **redis** (6379), and **web** (3000). The alert-agent container embeds five MCP servers and is backed by Redis for dedup, counters, and shared config.
+
+### Multi-Environment Endpoints (New)
+
+One agent now serves many environments (prod, sit, per-region clusters). A **Settings → Endpoint Management** page defines reusable, named data-source endpoints — Prometheus, Loki, Kubernetes, and **AWS (CloudWatch)** — each with its own authentication (basic / bearer / kube-context or token / IAM role or keys). A **Settings → Environments** page then builds each environment by picking endpoints from dropdowns and exposes a per-environment webhook URL (`/webhook/<name>`). Each cluster's Alertmanager posts to its own URL, so the agent queries the right systems with the right credentials automatically — no restarts, secrets stored masked.
 
 ---
 

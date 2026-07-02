@@ -59,6 +59,98 @@ class TestConfigApi(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(save.call_args.args[0], "routing")
 
+    # ── environments (endpoint refs, no label matching) ───────────────────
+    def test_post_environments_unknown_ref_returns_400(self):
+        body = {"environments": [{"name": "prod", "prometheus": "missing-endpoint"}]}
+        import api.config_api as config_api
+        with patch.object(config_api._environments, "endpoint_index", return_value={}), \
+             patch.object(config_api._redis, "save_yaml_and_publish") as save:
+            resp = self.client.post("/api/config/environments", json=body)
+        self.assertEqual(resp.status_code, 400)
+        save.assert_not_called()
+
+    def test_post_environments_valid_persists_with_kind(self):
+        body = {"environments": [{"name": "prod", "prometheus": "prod-prom"}]}
+        registry = {"prod-prom": {"name": "prod-prom", "type": "prometheus", "url": "http://p"}}
+        import api.config_api as config_api
+        with patch.object(config_api._cfg, "ENVIRONMENTS_CONFIG_PATH", ""), \
+             patch.object(config_api._environments, "endpoint_index", return_value=registry), \
+             patch.object(config_api._redis, "save_yaml_and_publish") as save, \
+             patch.object(config_api._environments, "reset_cache"):
+            resp = self.client.post("/api/config/environments", json=body)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(save.call_args.args[0], "environments")
+
+    def test_post_environments_reserved_name_returns_400(self):
+        body = {"environments": [{"name": "test"}]}
+        import api.config_api as config_api
+        with patch.object(config_api._environments, "endpoint_index", return_value={}), \
+             patch.object(config_api._redis, "save_yaml_and_publish") as save:
+            resp = self.client.post("/api/config/environments", json=body)
+        self.assertEqual(resp.status_code, 400)
+        save.assert_not_called()
+
+    def test_post_environments_redis_down_returns_503(self):
+        body = {"environments": [{"name": "prod"}]}
+        import api.config_api as config_api
+        with patch.object(config_api._cfg, "ENVIRONMENTS_CONFIG_PATH", ""), \
+             patch.object(config_api._environments, "endpoint_index", return_value={}), \
+             patch.object(config_api._redis, "save_yaml_and_publish", side_effect=Exception("down")):
+            resp = self.client.post("/api/config/environments", json=body)
+        self.assertEqual(resp.status_code, 503)
+
+    # ── endpoints registry ────────────────────────────────────────────────
+    def test_get_endpoints_masks_secrets(self):
+        import yaml
+        import api.config_api as config_api
+        stored = {"endpoints": [
+            {"name": "p", "type": "prometheus", "url": "http://p", "auth": {"mode": "bearer", "token": "SECRET"}}]}
+        with patch.object(config_api._cfg, "ENDPOINTS_CONFIG_PATH", ""), \
+             patch.object(config_api._redis, "endpoints_yaml_load", return_value=yaml.safe_dump(stored)):
+            resp = self.client.get("/api/config/endpoints")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["endpoints"][0]["auth"]["token"], "***")
+
+    def test_post_endpoints_invalid_type_returns_400(self):
+        body = {"endpoints": [{"name": "x", "type": "nope"}]}
+        import api.config_api as config_api
+        with patch.object(config_api._redis, "endpoints_yaml_load", return_value=""), \
+             patch.object(config_api._redis, "save_yaml_and_publish") as save:
+            resp = self.client.post("/api/config/endpoints", json=body)
+        self.assertEqual(resp.status_code, 400)
+        save.assert_not_called()
+
+    def test_post_endpoints_masked_secret_preserved(self):
+        import yaml
+        import api.config_api as config_api
+        stored = {"endpoints": [
+            {"name": "p", "type": "prometheus", "url": "http://p", "auth": {"mode": "bearer", "token": "REAL"}}]}
+        # UI re-posts with the secret still masked → the stored value must survive.
+        body = {"endpoints": [
+            {"name": "p", "type": "prometheus", "url": "http://p", "auth": {"mode": "bearer", "token": "***"}}]}
+        captured = {}
+
+        def _save(kind, yaml_text):
+            captured["yaml"] = yaml_text
+            return 1
+
+        with patch.object(config_api._cfg, "ENDPOINTS_CONFIG_PATH", ""), \
+             patch.object(config_api._redis, "endpoints_yaml_load", return_value=yaml.safe_dump(stored)), \
+             patch.object(config_api._redis, "save_yaml_and_publish", side_effect=_save), \
+             patch.object(config_api._environments, "reset_cache"):
+            resp = self.client.post("/api/config/endpoints", json=body)
+        self.assertEqual(resp.status_code, 200)
+        saved = yaml.safe_load(captured["yaml"])
+        self.assertEqual(saved["endpoints"][0]["auth"]["token"], "REAL")
+
+    def test_post_endpoints_redis_down_returns_503(self):
+        body = {"endpoints": [{"name": "p", "type": "prometheus", "url": "http://p"}]}
+        import api.config_api as config_api
+        with patch.object(config_api._redis, "endpoints_yaml_load", return_value=""), \
+             patch.object(config_api._redis, "save_yaml_and_publish", side_effect=Exception("down")):
+            resp = self.client.post("/api/config/endpoints", json=body)
+        self.assertEqual(resp.status_code, 503)
+
 
 if __name__ == "__main__":
     unittest.main()

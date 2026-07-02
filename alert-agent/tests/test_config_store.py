@@ -108,6 +108,43 @@ class TestConfigStore(unittest.TestCase):
             values = cs.get_masked()
         self.assertEqual(values["OPENAI_API_KEY"], "***")
 
+    def test_provider_keys_are_configurable_and_sensitive(self):
+        for key in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_SA_JSON",
+                    "OPENAI_BASE_URL", "GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION",
+                    "GOOGLE_GENAI_USE_VERTEXAI", "AWS_REGION", "AWS_ROLE_ARN"):
+            self.assertIn(key, cs.CONFIGURABLE_KEYS, key)
+        for key in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_SA_JSON"):
+            self.assertIn(key, cs.SENSITIVE_KEYS, key)
+
+    def test_apply_live_sets_provider_env_vars(self):
+        for key in ("ANTHROPIC_API_KEY", "AWS_REGION", "GOOGLE_CLOUD_PROJECT"):
+            self.addCleanup(os.environ.pop, key, None)
+        cs._apply_live("ANTHROPIC_API_KEY", "sk-ant-xyz")
+        cs._apply_live("AWS_REGION", "ap-south-1")
+        cs._apply_live("GOOGLE_CLOUD_PROJECT", "proj-1")
+        self.assertEqual(os.environ["ANTHROPIC_API_KEY"], "sk-ant-xyz")
+        self.assertEqual(os.environ["AWS_REGION"], "ap-south-1")
+        self.assertEqual(_cfg.GOOGLE_CLOUD_PROJECT, "proj-1")
+
+    def test_gemini_api_key_also_sets_google_api_key(self):
+        self.addCleanup(os.environ.pop, "GEMINI_API_KEY", None)
+        self.addCleanup(os.environ.pop, "GOOGLE_API_KEY", None)
+        cs._apply_live("GEMINI_API_KEY", "AIza-test")
+        self.assertEqual(os.environ["GEMINI_API_KEY"], "AIza-test")
+        self.assertEqual(os.environ["GOOGLE_API_KEY"], "AIza-test")
+
+    def test_google_sa_json_materialised_to_file(self):
+        self.addCleanup(os.environ.pop, "GOOGLE_APPLICATION_CREDENTIALS", None)
+        sa = '{"type": "service_account", "project_id": "p"}'
+        cs._apply_live("GOOGLE_SA_JSON", sa)
+        path = os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
+        self.addCleanup(lambda: os.path.exists(path) and os.unlink(path))
+        with open(path, encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), sa)
+        # Blank clears the env var.
+        cs._apply_live("GOOGLE_SA_JSON", "")
+        self.assertNotIn("GOOGLE_APPLICATION_CREDENTIALS", os.environ)
+
     def test_get_all_falls_back_to_file_when_redis_down(self):
         with open(self.store_path, "w", encoding="utf-8") as fh:
             json.dump({"LOKI_URL": "http://filefallback:3100"}, fh)

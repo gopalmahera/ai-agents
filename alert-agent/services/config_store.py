@@ -36,7 +36,17 @@ class ConfigStoreUnavailable(RuntimeError):
 CONFIGURABLE_KEYS = [
     "AI_PROVIDER",
     "OPENAI_MODEL",
+    "OPENAI_MODEL_INFO",
     "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_SA_JSON",
+    "GOOGLE_CLOUD_PROJECT",
+    "GOOGLE_CLOUD_LOCATION",
+    "GOOGLE_GENAI_USE_VERTEXAI",
+    "AWS_REGION",
+    "AWS_ROLE_ARN",
     "LLM_ENABLED",
     "SLACK_WEBHOOK_URL",
     "PROMETHEUS_URL",
@@ -48,12 +58,41 @@ CONFIGURABLE_KEYS = [
     "ROUTING_CONFIG_PATH",
 ]
 
-SENSITIVE_KEYS = {"OPENAI_API_KEY", "SLACK_WEBHOOK_URL"}
+SENSITIVE_KEYS = {
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_SA_JSON",
+    "SLACK_WEBHOOK_URL",
+}
+
+# Provider credential/setting keys applied to cfg + os.environ verbatim.
+_PROVIDER_ENV_KEYS = {
+    "OPENAI_BASE_URL",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_CLOUD_PROJECT",
+    "GOOGLE_CLOUD_LOCATION",
+    "GOOGLE_GENAI_USE_VERTEXAI",
+    "AWS_REGION",
+    "AWS_ROLE_ARN",
+    "OPENAI_MODEL_INFO",
+}
 
 _DEFAULTS: dict = {
     "AI_PROVIDER": "openai",
     "OPENAI_MODEL": "gpt-4o",
+    "OPENAI_MODEL_INFO": "gpt-4o-mini",
     "OPENAI_API_KEY": "",
+    "OPENAI_BASE_URL": "",
+    "ANTHROPIC_API_KEY": "",
+    "GEMINI_API_KEY": "",
+    "GOOGLE_SA_JSON": "",
+    "GOOGLE_CLOUD_PROJECT": "",
+    "GOOGLE_CLOUD_LOCATION": "us-central1",
+    "GOOGLE_GENAI_USE_VERTEXAI": "true",
+    "AWS_REGION": "",
+    "AWS_ROLE_ARN": "",
     "LLM_ENABLED": True,
     "SLACK_WEBHOOK_URL": "",
     "PROMETHEUS_URL": "http://service-gps.monitoring.svc.cluster.local:9090",
@@ -147,6 +186,8 @@ def _yaml_seed_sources() -> dict[str, str]:
         "routing": _cfg.ROUTING_CONFIG_PATH or "",
         "silences": os.getenv("SILENCES_CONFIG_PATH", "/app/config/silences.yaml"),
         "time_intervals": os.getenv("TIME_INTERVALS_CONFIG_PATH", "/app/config/time_intervals.yaml"),
+        "endpoints": getattr(_cfg, "ENDPOINTS_CONFIG_PATH", "") or "",
+        "environments": getattr(_cfg, "ENVIRONMENTS_CONFIG_PATH", "") or "",
     }
 
 
@@ -249,8 +290,37 @@ def _apply_live(key: str, value) -> None:
             return
         cfg.ALLOWED_ALERTNAMES = str_val
         os.environ[key] = str_val
-    elif key in ("OPENAI_API_KEY", "OPENAI_MODEL", "AI_PROVIDER", "SLACK_WEBHOOK_URL",
-                 "PROMETHEUS_URL", "LOKI_URL", "LOGS_DIR",
-                 "ALERT_CATALOG_PATH", "ROUTING_CONFIG_PATH"):
+    elif key == "GOOGLE_SA_JSON":
+        # Materialise the SA JSON to a file per replica and point the SDK at it.
+        cfg.GOOGLE_SA_JSON = str_val
+        _apply_google_sa_json(cfg, str_val)
+    elif key == "GEMINI_API_KEY":
         setattr(cfg, key, str_val)
         os.environ[key] = str_val
+        os.environ["GOOGLE_API_KEY"] = str_val  # google-genai GLA reads this
+    elif key in _PROVIDER_ENV_KEYS or key in (
+        "OPENAI_API_KEY", "OPENAI_MODEL", "AI_PROVIDER", "SLACK_WEBHOOK_URL",
+        "PROMETHEUS_URL", "LOKI_URL", "LOGS_DIR",
+        "ALERT_CATALOG_PATH", "ROUTING_CONFIG_PATH",
+    ):
+        setattr(cfg, key, str_val)
+        os.environ[key] = str_val
+
+
+def _apply_google_sa_json(cfg, content: str) -> None:
+    """Write the GCP service-account JSON to a file and set the SDK env var."""
+    path = str(Path(cfg.CONFIG_STORE_PATH).parent / "gcp-sa.json")
+    if not content.strip():
+        os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        cfg.GOOGLE_APPLICATION_CREDENTIALS = ""
+        return
+    try:
+        atomic_write_text(path, content)
+        os.chmod(path, 0o600)
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = path
+        cfg.GOOGLE_APPLICATION_CREDENTIALS = path
+    except Exception as exc:
+        logger.warning(
+            "Failed to materialise GOOGLE_SA_JSON",
+            extra={"event": "config_sa_json_error", "error": str(exc)},
+        )

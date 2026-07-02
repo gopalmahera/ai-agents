@@ -1,7 +1,8 @@
 import requests
 
 from services.classification.alert_classifier import AlertContext
-from config import PROMETHEUS_URL
+import config as _cfg
+from services import environments as _environments
 
 _POD_CPU_ALERT = "PODCPULimitsUage>=90"
 _POD_MEMORY_ALERT = "PODMemoryLimitsUage>=90"
@@ -19,9 +20,13 @@ def _pod_labels_filter(namespace: str, pod: str, container: str) -> str:
 
 
 def _query_promql(query: str) -> dict:
+    prom = _environments.current().prometheus
+    base = prom.url or _cfg.PROMETHEUS_URL
+    auth = prom.auth.header_value()
     response = requests.get(
-        f"{PROMETHEUS_URL}/api/v1/query",
+        f"{base}/api/v1/query",
         params={"query": query},
+        headers={"Authorization": auth} if auth else None,
         timeout=30,
     )
     response.raise_for_status()

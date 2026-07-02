@@ -11,6 +11,7 @@ from views.slack_view import format_rca, format_report_header
 from services.notification.slack_client import send_alert_report
 import services.store.redis_client as _redis
 import services.store.mongo_client as _mongo
+from services import environments as _environments
 from utils.metrics import llm_investigations, slack_posts
 from services.notification import silences as _silences
 from utils.log import get_logger
@@ -153,11 +154,22 @@ def _save_report(alert: dict, ctx, body: str, *, usage: dict | None = None, skip
     return result
 
 
-def investigate_alert(alert: dict, *, skip_slack: bool = False) -> dict | None:
+def investigate_alert(alert: dict, *, env: str | None = None, skip_slack: bool = False) -> dict | None:
     status = alert.get("status")
     labels = alert.get("labels", {})
     alertname = labels.get("alertname", "unknown")
 
+    # Resolve this environment's endpoints (from the webhook path /webhook/<env>)
+    # for the investigation — direct queries + MCP tools read them via
+    # environments.current(). No env → the "default" environment / boot defaults.
+    _env_token = _environments.bind(env)
+    try:
+        return _investigate_alert(alert, labels, alertname, status, skip_slack=skip_slack)
+    finally:
+        _environments.reset(_env_token)
+
+
+def _investigate_alert(alert, labels, alertname, status, *, skip_slack=False):
     if status != "firing":
         logger.info(
             "Skipping non-firing alert",

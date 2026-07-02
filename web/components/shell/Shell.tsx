@@ -5,14 +5,24 @@ import { usePathname } from "next/navigation";
 import { Bell, Moon, Sun, Menu, X, ChevronDown } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 
-const NAV = [
+type NavLink = { href: string; label: string };
+type NavGroup = { label: string; children: NavLink[] };
+type NavItem = NavLink | NavGroup;
+
+const NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard" },
   {
     label: "Config",
     children: [
       { href: "/config/ai", label: "AI Provider" },
-      { href: "/config/mcp", label: "Service Endpoints" },
       { href: "/config/storage", label: "Storage & Behavior" },
+    ],
+  },
+  {
+    label: "Settings",
+    children: [
+      { href: "/settings/endpoints", label: "Endpoint Management" },
+      { href: "/settings/environments", label: "Environments" },
     ],
   },
   { href: "/routing", label: "Routing" },
@@ -30,9 +40,8 @@ function navLinkClass(active: boolean) {
   }`;
 }
 
-function ConfigDropdown({ pathname }: { pathname: string }) {
-  const item = NAV.find((n) => "children" in n)!;
-  const children = (item as { children: { href: string; label: string }[] }).children;
+function NavDropdown({ item, pathname }: { item: NavGroup; pathname: string }) {
+  const children = item.children;
   const active = children.some((c) => pathname.startsWith(c.href));
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -51,11 +60,11 @@ function ConfigDropdown({ pathname }: { pathname: string }) {
         onClick={() => setOpen((v) => !v)}
         className={`${navLinkClass(active)} inline-flex items-center gap-1`}
       >
-        Config
+        {item.label}
         <ChevronDown size={13} className={`transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open && (
-        <div className="absolute top-full left-0 mt-1 w-44 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1 z-50">
+        <div className="absolute top-full left-0 mt-1 w-52 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1 z-50">
           {children.map((c) => (
             <Link
               key={c.href}
@@ -126,7 +135,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           <nav className="hidden sm:flex items-center gap-0.5 flex-1">
             {NAV.map((item) =>
               "children" in item ? (
-                <ConfigDropdown key="config" pathname={pathname} />
+                <NavDropdown key={item.label} item={item} pathname={pathname} />
               ) : (
                 <Link
                   key={item.href}
@@ -163,7 +172,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               <nav className="flex flex-col gap-0.5 px-4 py-3" onClick={() => setMobileOpen(false)}>
                 {NAV.flatMap((item) =>
                   "children" in item
-                    ? (item as { children: { href: string; label: string }[] }).children.map((c) => (
+                    ? item.children.map((c) => (
                         <Link
                           key={c.href}
                           href={c.href}
@@ -173,7 +182,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                               : "text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
                           }`}
                         >
-                          <span className="text-xs text-slate-400 dark:text-slate-600">Config /</span>
+                          <span className="text-xs text-slate-400 dark:text-slate-600">{item.label} /</span>
                           {c.label}
                         </Link>
                       ))

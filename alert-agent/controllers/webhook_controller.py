@@ -1,7 +1,7 @@
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-from flask import Flask, jsonify, request, Response
+from flask import Flask, abort, jsonify, request, Response
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from controllers.investigation_controller import investigate_alert
@@ -62,9 +62,9 @@ def _is_duplicate(fingerprint: str) -> bool:
     return _redis.dedup_check_and_set(fingerprint, _cfg.DEDUP_TTL_SECONDS)
 
 
-def _investigate_in_background(alert: dict) -> None:
+def _investigate_in_background(alert: dict, env: str | None = None) -> None:
     try:
-        investigate_alert(alert)
+        investigate_alert(alert, env=env)
     finally:
         _get_slots().release()
 
@@ -107,8 +107,11 @@ def create_app() -> Flask:
         if alert.get("status") != "firing":
             alert = {**alert, "status": "firing"}
 
+        # Test against a specific environment via ?env=<name> or {"env": ...}.
+        env = request.args.get("env") or (payload.get("env") if isinstance(payload, dict) else None)
+
         try:
-            result = investigate_alert(alert, skip_slack=True)
+            result = investigate_alert(alert, env=env, skip_slack=True)
         except Exception as exc:
             return jsonify({"status": "error", "message": str(exc)}), 500
 
@@ -119,6 +122,16 @@ def create_app() -> Flask:
 
     @app.post("/webhook")
     def webhook():
+        return _process_webhook(None)
+
+    @app.post("/webhook/<env>")
+    def webhook_env(env: str):
+        # /webhook/test is the (auth-gated) test route; never let an env shadow it.
+        if env == "test":
+            abort(404)
+        return _process_webhook(env)
+
+    def _process_webhook(env: str | None):
         payload = request.get_json(silent=True)
         if payload is None:
             return jsonify({"status": "error", "message": "Invalid or missing JSON body"}), 400
@@ -246,7 +259,7 @@ def create_app() -> Flask:
                 continue
 
             try:
-                _get_executor().submit(_investigate_in_background, alert)
+                _get_executor().submit(_investigate_in_background, alert, env)
             except Exception:
                 _get_slots().release()
                 raise

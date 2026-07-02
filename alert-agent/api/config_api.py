@@ -15,6 +15,10 @@ from services.notification import silences as _silences
 from services.notification import time_intervals_store as _time_intervals_store
 from services.notification.silences_validation import validate_silences_body
 from services.notification.time_intervals_validation import validate_time_intervals_body
+from services import environments as _environments
+from services.environments_validation import validate_environments_body
+from services.endpoints_validation import validate_endpoints_body
+from services import endpoints_secrets
 
 bp = Blueprint("config_api", __name__, url_prefix="/api/config")
 
@@ -31,6 +35,7 @@ _MCP_SERVERS = {
     "PROMETHEUS_MCP_URL": lambda: _cfg.PROMETHEUS_MCP_URL,
     "LOKI_MCP_URL": lambda: _cfg.LOKI_MCP_URL,
     "KAFKA_MCP_URL": lambda: _cfg.KAFKA_MCP_URL,
+    "CLOUDWATCH_MCP_URL": lambda: getattr(_cfg, "CLOUDWATCH_MCP_URL", ""),
 }
 
 _DIRECT_SERVICES = {
@@ -77,7 +82,8 @@ def _probe_mcp_server(url: str) -> dict:
 def mcp_health():
     results = {}
     for key, url_fn in _MCP_SERVERS.items():
-        results[key] = _probe_mcp_server(url_fn())
+        url = url_fn()
+        results[key] = _probe_mcp_server(url) if url else {"url": "", "status": "not_configured"}
     return jsonify(results)
 
 
@@ -176,6 +182,113 @@ def post_routing():
             print(f"[config_api] Routing file mirror failed: {exc}")
 
     _routing.reset_cache()
+    return jsonify({"status": "ok"})
+
+
+def _load_yaml_config(redis_loader, path_attr: str, empty: dict) -> dict:
+    """Load a YAML config kind — Redis first (shared), local file fallback."""
+    text = None
+    try:
+        text = redis_loader()
+    except Exception:
+        text = None
+    if not text:
+        import os
+        path = getattr(_cfg, path_attr, "") or ""
+        if not path or not os.path.exists(path):
+            return dict(empty)
+        text = open(path, encoding="utf-8").read()
+    return yaml.safe_load(text) or dict(empty)
+
+
+@bp.get("/endpoints")
+@require_auth
+def get_endpoints():
+    """Named endpoint registry — secrets masked. Redis first, file fallback."""
+    try:
+        data = _load_yaml_config(_redis.endpoints_yaml_load, "ENDPOINTS_CONFIG_PATH", {"endpoints": []})
+        return jsonify(endpoints_secrets.mask_endpoints(data))
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@bp.post("/endpoints")
+@require_auth
+def post_endpoints():
+    """Save the endpoint registry to Redis (source of truth) and broadcast."""
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+
+    # Restore unchanged secrets (masked ***) from the stored registry.
+    try:
+        stored = _load_yaml_config(_redis.endpoints_yaml_load, "ENDPOINTS_CONFIG_PATH", {"endpoints": []})
+    except Exception:
+        stored = {"endpoints": []}
+    merged = endpoints_secrets.merge_endpoint_secrets(body, stored)
+
+    errors = validate_endpoints_body(merged)
+    if errors:
+        return jsonify({"error": "Validation failed", "details": errors}), 400
+
+    yaml_text = yaml.safe_dump(merged, default_flow_style=False, allow_unicode=True)
+    try:
+        _redis.save_yaml_and_publish("endpoints", yaml_text)
+    except Exception as exc:
+        return _redis_down(exc)
+
+    path = getattr(_cfg, "ENDPOINTS_CONFIG_PATH", "") or ""
+    if path:
+        try:
+            atomic_write_text(path, yaml_text)
+        except Exception as exc:
+            print(f"[config_api] Endpoints file mirror failed: {exc}")
+
+    _environments.reset_cache()
+    return jsonify({"status": "ok"})
+
+
+@bp.get("/environments")
+@require_auth
+def get_environments():
+    """Environment → endpoint-ref map — Redis first (shared), local file fallback."""
+    try:
+        data = _load_yaml_config(_redis.environments_yaml_load, "ENVIRONMENTS_CONFIG_PATH", {"environments": []})
+        return jsonify(data)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@bp.post("/environments")
+@require_auth
+def post_environments():
+    """Save the environment map to Redis (source of truth) and broadcast."""
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+
+    endpoints_by_type = {
+        name: str(ep.get("type") or "").lower()
+        for name, ep in _environments.endpoint_index().items()
+    }
+    errors = validate_environments_body(body, endpoints_by_type=endpoints_by_type)
+    if errors:
+        return jsonify({"error": "Validation failed", "details": errors}), 400
+
+    yaml_text = yaml.safe_dump(body, default_flow_style=False, allow_unicode=True)
+    try:
+        _redis.save_yaml_and_publish("environments", yaml_text)
+    except Exception as exc:
+        return _redis_down(exc)
+
+    path = _cfg.ENVIRONMENTS_CONFIG_PATH or ""
+    if path:
+        try:
+            atomic_write_text(path, yaml_text)
+        except Exception as exc:
+            print(f"[config_api] Environments file mirror failed: {exc}")
+
+    _environments.reset_cache()
     return jsonify({"status": "ok"})
 
 

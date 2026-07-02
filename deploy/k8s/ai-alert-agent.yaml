@@ -17,6 +17,16 @@ kind: ServiceAccount
 metadata:
   name: ai-alert-agent
   namespace: monitoring
+  # IRSA — for AWS Bedrock and/or the CloudWatch data source. Create an IAM role
+  # with a trust policy for this ServiceAccount (via eksctl/IAM OIDC) granting:
+  #   Bedrock:    bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream
+  #   CloudWatch: cloudwatch:GetMetricData, cloudwatch:GetMetricStatistics,
+  #               cloudwatch:ListMetrics, cloudwatch:DescribeAlarms,
+  #               logs:FilterLogEvents, logs:StartQuery, logs:GetQueryResults
+  # then set its ARN here. Per-environment AWS endpoints may also assume a
+  # cross-account role (sts:AssumeRole) configured in Settings → Endpoint Mgmt.
+  # annotations:
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::414448255958:role/ai-alert-agent-bedrock
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -191,6 +201,24 @@ spec:
               value: '8080'
             - name: RUNBOOK_BASE_URL
               value: https://wiki.dozee.internal/runbooks
+            # AWS Bedrock + CloudWatch: default region for the pod IAM role
+            # (IRSA). Credentials are supplied by the ServiceAccount role above;
+            # per-environment AWS endpoints may override region/role in the UI.
+            - name: AWS_REGION
+              value: ap-south-1
+            # ── Optional: deployment-managed provider secrets ──────────────────
+            # Prefer these over the Web UI if you don't want secrets stored in Redis.
+            # - name: ANTHROPIC_API_KEY
+            #     valueFrom: { secretKeyRef: { name: ai-alert-agent-secrets, key: anthropic-api-key } }
+            # Gemini (Vertex) via a mounted GCP service-account JSON:
+            # - name: GOOGLE_GENAI_USE_VERTEXAI
+            #   value: 'true'
+            # - name: GOOGLE_CLOUD_PROJECT
+            #   value: my-gcp-project
+            # - name: GOOGLE_CLOUD_LOCATION
+            #   value: us-central1
+            # - name: GOOGLE_APPLICATION_CREDENTIALS
+            #   value: /var/secrets/gcp/key.json
           livenessProbe:
             httpGet:
               path: /health
@@ -213,10 +241,31 @@ spec:
           volumeMounts:
             - name: logs
               mountPath: /app/logs
+            # Gemini (Vertex) — mount a GCP SA-JSON Secret (create it separately):
+            #   kubectl -n monitoring create secret generic ai-alert-agent-gcp \
+            #     --from-file=key.json=/path/to/sa.json
+            # - name: gcp-sa
+            #   mountPath: /var/secrets/gcp
+            #   readOnly: true
+            # Multi-environment Kubernetes — mount a multi-context kubeconfig so
+            # the agent can investigate alerts in other clusters (Environments →
+            # kube_context). Each context authenticates to its own cluster (on
+            # EKS, an `aws eks get-token` exec entry + IRSA/perms per cluster).
+            #   kubectl -n monitoring create secret generic ai-alert-agent-kubeconfig \
+            #     --from-file=config=/path/to/multi-cluster-kubeconfig
+            # - name: kubeconfig
+            #   mountPath: /var/secrets/kube
+            #   readOnly: true
       volumes:
         - name: logs
           persistentVolumeClaim:
             claimName: ai-alert-agent-logs
+        # - name: gcp-sa
+        #   secret:
+        #     secretName: ai-alert-agent-gcp
+        # - name: kubeconfig
+        #   secret:
+        #     secretName: ai-alert-agent-kubeconfig
 
 ---
 apiVersion: v1
