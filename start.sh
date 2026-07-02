@@ -61,13 +61,5 @@ export LOKI_MCP_URL="${LOKI_MCP_URL:-http://127.0.0.1:8003/mcp}"
 export KAFKA_MCP_URL="${KAFKA_MCP_URL:-http://127.0.0.1:8004/mcp}"
 export CLOUDWATCH_MCP_URL="${CLOUDWATCH_MCP_URL:-http://127.0.0.1:8005/mcp}"
 
-cd /app/alert-agent
-exec gunicorn \
-  --bind "0.0.0.0:${AGENT_PORT:-8080}" \
-  --workers 1 \
-  --threads 8 \
-  --timeout "${GUNICORN_TIMEOUT:-300}" \
-  --graceful-timeout "${GUNICORN_GRACEFUL_TIMEOUT:-30}" \
-  --access-logfile - \
-  --error-logfile - \
-  app:app
+cd /app/agent
+exec python worker.py

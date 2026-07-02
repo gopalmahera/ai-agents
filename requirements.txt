@@ -9,4 +9,4 @@ prometheus_client
 pyyaml
 redis
 pymongo
-boto3
+python-socketio[client]

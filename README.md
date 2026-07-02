@@ -2,43 +2,33 @@
 
 AI-powered Alertmanager webhook that automatically investigates firing alerts using live data from Kubernetes, Prometheus, Loki, and Kafka — then posts a structured Root Cause Analysis (RCA) to the right Slack channel.
 
-The stack has three services (via `docker compose`):
+## Five-part platform
 
-| Service | Port | Purpose |
+| Part | Path | Role |
 |---|---|---|
-| `alert-agent` | 8080 | Flask webhook, LLM agent, four embedded MCP tool servers |
-| `web` | 3000 | Next.js config dashboard (AI provider, MCP URLs, routing, logs, reports) |
-| `redis` | 6379 | Persistent store — dedup cache, counters, alert event stream |
+| **Web** | `apps/web` | Next.js admin UI only (no server-side API) |
+| **API** | `apps/api` | NestJS — settings CRUD, webhooks, BullMQ, Socket.IO gateway |
+| **Agent** | `apps/agent` | Python worker — outbound WebSocket to API, embedded MCP, LLM investigations |
+| **Mongo** | `infra/k8s/mongo.yaml` | Settings + alert event history |
+| **Redis** | `infra/k8s/redis.yaml` | Dedup, counters, BullMQ, Socket.IO adapter |
+
+```
+Alertmanager → POST /api/v1/webhook/:env (NestJS API)
+                    → Redis dedup + BullMQ queue
+                    → Socket.IO → Python agent (investigate_alert + MCP)
+                    → Slack + Mongo event history
+
+Admin UI (Next.js) → REST /api/v1/settings/* → Mongo
+                  → config.updated → connected agents refresh cache
+```
+
+Local stack: `docker compose up` (see `infra/docker/docker-compose.yml`).
+
+Legacy `/api/config/*` routes remain on the API for one release.
 
 ---
 
-## How It Works
-
-```
-Alertmanager                        Web UI (Next.js :3000)
-    │                                   │
-    │  POST /webhook                    │  /api/config, /api/metrics, /api/logs
-    ▼                                   ▼
-┌─────────────────────────────────────────────────────┐
-│                  alert-agent container               │
-│                                                     │
-│  Flask webhook  ──►  Classify alert by type         │
-│                           │                         │
-│                           ▼                         │
-│              PydanticAI Agent (OpenAI/Anthropic/    │
-│                    Gemini/Bedrock)                  │
-│                    │    │    │    │                  │
-│               k8s  prom loki kafka  ◄── MCP servers │
-│              :8001 :8002 :8003 :8004                │
-└──────────────┬──────────────────────────────────────┘
-    │          │
-    │          ▼
-    │        Redis (:6379) — dedup, counters, alert history
-    ▼
-Slack channel  (routed by routing.yaml)
-```
-
-1. Alertmanager fires → `POST /webhook`
+## How It Works (agent investigation)
 2. Allowlist filter → **silence check** (skip LLM + Slack if matched) → dedup
 3. Alert is classified by resource type: `kubernetes`, `host`, `probe`, `kafka`
 4. The LLM agent queries live MCP tools (pod events, Prometheus metrics, Loki logs, Kafka lag)
