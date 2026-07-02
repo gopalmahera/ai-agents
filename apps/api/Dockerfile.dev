@@ -1,0 +1,15 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY apps/api/package*.json ./
+RUN npm ci
+
+COPY apps/api/tsconfig*.json apps/api/nest-cli.json ./
+COPY apps/api/src ./src
+COPY packages/shared /packages/shared
+
+ENV NODE_ENV=development
+EXPOSE 4000
+
+CMD ["npm", "run", "start:dev"]

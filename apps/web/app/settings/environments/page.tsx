@@ -125,30 +125,32 @@ export default function EnvironmentsPage() {
         />
       }
     >
-      {!hasDefault && (
+      {!drawerOpen && !hasDefault && (
         <div className="badge-yellow mb-4">Tip: add an environment named “default” for bare /webhook posts.</div>
       )}
 
-      {filtered.length === 0 ? (
-        <div className="card text-sm text-slate-500 flex items-center gap-2">
-          <Layers size={15} /> No environments yet.
-        </div>
-      ) : (
-        <SettingsCardGrid>
-          {filtered.map((env) => (
-            <SettingsEntityCard
-              key={env.id}
-              title={env.name || "(unnamed)"}
-              subtitle={[env.prometheus, env.loki, env.kubernetes].filter(Boolean).join(" · ") || "No endpoints linked"}
-              onClick={() => {
-                setOriginalName(env.name.trim() || undefined);
-                setEditing({ ...env });
-                setDrawerOpen(true);
-              }}
-              onDelete={env.name ? () => deleteMutation.mutate(env.name.trim()) : undefined}
-            />
-          ))}
-        </SettingsCardGrid>
+      {!drawerOpen && (
+        filtered.length === 0 ? (
+          <div className="card text-sm text-slate-500 flex items-center gap-2">
+            <Layers size={15} /> No environments yet.
+          </div>
+        ) : (
+          <SettingsCardGrid>
+            {filtered.map((env) => (
+              <SettingsEntityCard
+                key={env.id}
+                title={env.name || "(unnamed)"}
+                subtitle={[env.prometheus, env.loki, env.kubernetes].filter(Boolean).join(" · ") || "No endpoints linked"}
+                onClick={() => {
+                  setOriginalName(env.name.trim() || undefined);
+                  setEditing({ ...env });
+                  setDrawerOpen(true);
+                }}
+                onDelete={env.name ? () => deleteMutation.mutate(env.name.trim()) : undefined}
+              />
+            ))}
+          </SettingsCardGrid>
+        )
       )}
 
       <SettingsDrawer

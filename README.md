@@ -27,8 +27,22 @@ Admin UI → REST /api/v1/settings/* → Mongo
 ```bash
 cp .env.example .env
 # Set OPENAI_API_KEY, SLACK_WEBHOOK_URL, PROMETHEUS_URL, LOKI_URL, ADMIN_TOKEN
+```
 
-docker compose up --build
+### Development (hot reload)
+
+```bash
+make dev
+# or: docker compose -f docker-compose.dev.yml up --build
+```
+
+Edits to `apps/api/src`, `apps/web`, and `apps/agent` reload automatically.
+
+### Production
+
+```bash
+make prod
+# or: docker compose up --build
 ```
 
 | Service | URL |

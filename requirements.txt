@@ -10,3 +10,5 @@ pyyaml
 redis
 pymongo
 python-socketio[client]
+watchfiles
+boto3

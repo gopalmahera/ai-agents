@@ -1,0 +1,4 @@
+# Development — hot reload for api, web, and agent
+include:
+  - path: infra/docker/docker-compose.base.yml
+  - path: infra/docker/docker-compose.dev.yml

@@ -126,7 +126,6 @@ export default function EndpointsPage() {
   });
 
   const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<EditableEndpoint | null>(null);
   const [originalName, setOriginalName] = useState<string | undefined>();
@@ -135,13 +134,15 @@ export default function EndpointsPage() {
   const eps = useMemo(() => fromEndpointsConfig(data), [data]);
 
   const filtered = useMemo(() => {
-    return eps.filter((e) => {
-      if (typeFilter && e.type !== typeFilter) return false;
-      if (!search) return true;
-      const q = search.toLowerCase();
-      return e.name.toLowerCase().includes(q) || e.url.toLowerCase().includes(q) || e.region.toLowerCase().includes(q);
-    });
-  }, [eps, search, typeFilter]);
+    if (!search) return eps;
+    const q = search.toLowerCase();
+    return eps.filter(
+      (e) =>
+        e.name.toLowerCase().includes(q) ||
+        e.url.toLowerCase().includes(q) ||
+        e.region.toLowerCase().includes(q),
+    );
+  }, [eps, search]);
 
   const validation = editing ? validateEndpoints([editing]) : { valid: true, eps: {} as Record<string, string> };
 
@@ -168,9 +169,9 @@ export default function EndpointsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["endpoints"] }),
   });
 
-  const openNew = (type: EndpointType) => {
+  const openNew = () => {
     setOriginalName(undefined);
-    setEditing(blankEndpoint(type, `new-${Date.now()}`));
+    setEditing(blankEndpoint("prometheus", `new-${Date.now()}`));
     setDrawerOpen(true);
   };
 
@@ -191,40 +192,30 @@ export default function EndpointsPage() {
           search={search}
           onSearchChange={setSearch}
           searchPlaceholder="Search endpoints…"
-          filter={typeFilter}
-          filterOptions={[{ value: "", label: "All types" }, ...ENDPOINT_TYPES.map((t) => ({ value: t.value, label: t.label }))]}
-          onFilterChange={setTypeFilter}
           addLabel="Add endpoint"
-          onAdd={() => openNew("prometheus")}
-          extra={
-            <div className="flex gap-1 flex-wrap">
-              {ENDPOINT_TYPES.map((t) => (
-                <button key={t.value} className="btn-secondary text-xs" onClick={() => openNew(t.value)}>
-                  + {t.label}
-                </button>
-              ))}
-            </div>
-          }
+          onAdd={openNew}
         />
       }
     >
-      {filtered.length === 0 ? (
-        <div className="card text-sm text-slate-500 flex items-center gap-2">
-          <Server size={15} /> No endpoints match — add one above.
-        </div>
-      ) : (
-        <SettingsCardGrid>
-          {filtered.map((ep) => (
-            <SettingsEntityCard
-              key={ep.id}
-              title={ep.name || "(unnamed)"}
-              subtitle={ep.type === "aws" ? ep.region || "AWS" : ep.url || TYPE_LABEL[ep.type]}
-              badges={<span className="badge-green text-xs">{TYPE_LABEL[ep.type]}</span>}
-              onClick={() => openEdit(ep)}
-              onDelete={ep.name ? () => deleteMutation.mutate(ep.name.trim()) : undefined}
-            />
-          ))}
-        </SettingsCardGrid>
+      {!drawerOpen && (
+        filtered.length === 0 ? (
+          <div className="card text-sm text-slate-500 flex items-center gap-2">
+            <Server size={15} /> No endpoints match — add one above.
+          </div>
+        ) : (
+          <SettingsCardGrid>
+            {filtered.map((ep) => (
+              <SettingsEntityCard
+                key={ep.id}
+                title={ep.name || "(unnamed)"}
+                subtitle={ep.type === "aws" ? ep.region || "AWS" : ep.url || TYPE_LABEL[ep.type]}
+                badges={<span className="badge-green text-xs">{TYPE_LABEL[ep.type]}</span>}
+                onClick={() => openEdit(ep)}
+                onDelete={ep.name ? () => deleteMutation.mutate(ep.name.trim()) : undefined}
+              />
+            ))}
+          </SettingsCardGrid>
+        )
       )}
 
       <SettingsDrawer
@@ -255,7 +246,23 @@ export default function EndpointsPage() {
                 <input className="input" value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
               </Field>
               <Field label="Type">
-                <input className="input bg-slate-50 dark:bg-slate-900" value={TYPE_LABEL[editing.type]} disabled />
+                <select
+                  className="input"
+                  value={editing.type}
+                  onChange={(e) => {
+                    const newType = e.target.value as EndpointType;
+                    if (newType === editing.type) return;
+                    const next = blankEndpoint(newType, editing.id);
+                    next.name = editing.name;
+                    setEditing(next);
+                  }}
+                >
+                  {ENDPOINT_TYPES.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
               </Field>
             </div>
             <AuthFields ep={editing} patch={(p) => setEditing({ ...editing, ...p })} />

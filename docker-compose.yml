@@ -1,3 +1,4 @@
-# Thin wrapper — Dozee Alert Intelligence (DAI)
+# Production — Dozee Alert Intelligence (DAI)
 include:
-  - path: infra/docker/docker-compose.yml
+  - path: infra/docker/docker-compose.base.yml
+  - path: infra/docker/docker-compose.prod.yml

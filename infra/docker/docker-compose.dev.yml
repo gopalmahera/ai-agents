@@ -1,12 +1,93 @@
-# Dev overrides — mount source for hot reload where supported
+# Development — hot reload via bind mounts + watch mode
 services:
   api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile.dev
+    ports:
+      - '4000:4000'
+    env_file:
+      - ../../.env
     volumes:
       - ../../apps/api/src:/app/src
       - ../../packages/shared:/packages/shared
       - ../../logs:/app/logs
       - ../../config:/app/config
+      - api_node_modules:/app/node_modules
+    environment:
+      NODE_ENV: development
+      API_PORT: '4000'
+      MONGO_URL: mongodb://mongo:27017
+      MONGO_DB: dai
+      REDIS_URL: redis://redis:6379/0
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      LOGS_DIR: /app/logs
+      CONFIG_ROOT: /app/config
+      BULLMQ_PREFIX: dai
+      CHOKIDAR_USEPOLLING: 'true'
+    command: npm run start:dev
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
 
   web:
     build:
-      target: deps
+      context: ../..
+      dockerfile: apps/web/Dockerfile.dev
+    ports:
+      - '3000:3000'
+    volumes:
+      - ../../apps/web:/app
+      - web_node_modules:/app/node_modules
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      NEXT_PUBLIC_ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      WATCHPACK_POLLING: 'true'
+      CHOKIDAR_USEPOLLING: 'true'
+    command: npm run dev -- --hostname 0.0.0.0
+    depends_on:
+      - api
+
+  agent:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.agent
+      platforms:
+        - linux/amd64
+    platform: linux/amd64
+    env_file:
+      - ../../.env
+    volumes:
+      - ../../apps/agent:/app/agent
+      - ../../mcp-servers:/app/mcp-servers
+      - ../../logs:/app/logs
+      - ../../config:/app/config
+      - ../../start-dev.sh:/app/start-dev.sh
+    environment:
+      NODE_ENV: development
+      PROMETHEUS_URL: ${PROMETHEUS_URL}
+      LOKI_URL: ${LOKI_URL}
+      LOGS_DIR: /app/logs
+      REDIS_URL: redis://redis:6379/0
+      MONGO_URL: mongodb://mongo:27017
+      MONGO_DB: dai
+      AGENT_ID: ${AGENT_ID:-default}
+      AGENT_TOKEN: ${ADMIN_TOKEN:-}
+      API_WS_URL: http://api:4000
+      API_HTTP_URL: http://api:4000
+      AGENT_PORT: '8080'
+      ENABLE_FLASK_WEBHOOKS: 'false'
+    command: ['/bin/sh', '/app/start-dev.sh']
+    depends_on:
+      - api
+      - redis
+      - mongo
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+
+volumes:
+  api_node_modules:
+  web_node_modules:

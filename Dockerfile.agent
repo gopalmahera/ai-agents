@@ -48,10 +48,10 @@ WORKDIR /app
 COPY --chown=appuser:appuser mcp-servers/ ./mcp-servers/
 COPY --chown=appuser:appuser apps/agent/ ./agent/
 COPY --chown=appuser:appuser config/ ./config/
-COPY --chown=appuser:appuser start.sh .
+COPY --chown=appuser:appuser start.sh start-dev.sh .
 
-RUN sed -i 's/\r$//' start.sh \
-    && chmod +x start.sh \
+RUN sed -i 's/\r$//' start.sh start-dev.sh \
+    && chmod +x start.sh start-dev.sh \
     && mkdir -p /app/logs \
     && chown -R appuser:appuser /app
 
