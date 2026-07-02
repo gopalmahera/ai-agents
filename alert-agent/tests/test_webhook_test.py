@@ -17,6 +17,7 @@ for _name in (
     "alerts_received",
     "alerts_deduplicated",
     "alerts_skipped",
+    "alerts_silenced",
     "alerts_accepted",
     "llm_investigations",
     "slack_posts",

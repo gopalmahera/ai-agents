@@ -14,6 +14,7 @@ _COUNTER_KEYS = [
     "alerts_accepted",
     "alerts_deduplicated",
     "alerts_skipped",
+    "alerts_silenced",
     "llm_success",
     "llm_fallback",
     "llm_error",
@@ -36,6 +37,7 @@ def metrics_stats():
         "alerts_accepted": counts["alerts_accepted"],
         "alerts_deduplicated": counts["alerts_deduplicated"],
         "alerts_skipped": counts["alerts_skipped"],
+        "alerts_silenced": counts["alerts_silenced"],
         "llm_investigations": {
             "success": counts["llm_success"],
             "fallback": counts["llm_fallback"],

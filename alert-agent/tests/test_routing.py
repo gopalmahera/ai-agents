@@ -1,10 +1,12 @@
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 import yaml
 
 import services.notification.routing as routing
+from services.notification import time_intervals
 
 
 def _write_config(data: dict) -> str:
@@ -17,8 +19,9 @@ def _write_config(data: dict) -> str:
 class TestRouting(unittest.TestCase):
     def setUp(self):
         routing.reset_cache()
+        time_intervals.reset_cache()
         self.addCleanup(routing.reset_cache)
-        # No Redis in unit tests — force fallback to the file path
+        self.addCleanup(time_intervals.reset_cache)
         patcher = mock.patch.object(routing._redis, "routing_yaml_load", return_value=None)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -62,7 +65,6 @@ class TestRouting(unittest.TestCase):
             routing.resolve_webhook_url({"severity": "critical", "stage": "prod"}),
             "https://prod-critical",
         )
-        # Missing stage — should NOT match
         self.assertEqual(
             routing.resolve_webhook_url({"severity": "critical", "stage": "sit"}),
             "https://default",
@@ -77,6 +79,30 @@ class TestRouting(unittest.TestCase):
             ],
         })
         self.assertEqual(routing.resolve_webhook_url({"severity": "critical"}), "https://first")
+
+    def test_mute_time_interval_skips_route(self):
+        time_intervals.set_intervals([
+            {
+                "name": "always",
+                "time_intervals": [{
+                    "weekdays": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
+                    "times": [],
+                    "location": "UTC",
+                }],
+            }
+        ])
+        self._load({
+            "default_slack_webhook_url": "https://default",
+            "routes": [
+                {
+                    "match": {"severity": "critical"},
+                    "slack_webhook_url": "https://muted",
+                    "mute_time_intervals": ["always"],
+                },
+                {"match": {"severity": "critical"}, "slack_webhook_url": "https://fallback"},
+            ],
+        })
+        self.assertEqual(routing.resolve_webhook_url({"severity": "critical"}), "https://fallback")
 
     def test_no_config_falls_back_to_env(self):
         with mock.patch.object(routing._cfg, "ROUTING_CONFIG_PATH", "", create=True), \

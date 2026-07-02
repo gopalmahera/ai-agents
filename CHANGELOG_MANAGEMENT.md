@@ -70,10 +70,26 @@ Previously all alerts went to a single Slack webhook. We added a **routing confi
 **Routing rules support:**
 - Exact label match (e.g. `severity: critical` AND `stage: prod`)
 - Regex label match (e.g. all `EC2Host*` alerts → `#infra-alerts`)
+- **Mute time intervals** — skip a route during named schedules (e.g. overnight hours) and fall through to the next rule
 - First-match-wins ordering (same as Alertmanager)
 - A default fallback channel
 
 **To update routing:** use the Web UI, `POST /api/config/routing`, or edit `routing.yaml` — changes propagate without a container restart when using the API/Redis path.
+
+---
+
+### 2a. Time Intervals & Silences
+
+Two separate Alertmanager-style modules for controlling alert noise:
+
+| Module | Purpose | Config | Web UI |
+|---|---|---|---|
+| **Time Intervals** | Named schedules (weekdays, times, timezone) referenced by routing rules via `mute_time_intervals` | `config/time_intervals.yaml` | `/time-intervals` |
+| **Silences** | Skip LLM investigation and Slack entirely for matching alerts | `config/silences.yaml` | `/silences` |
+
+**Silence modes:** `permanent` (until manually disabled) or `until` (auto-expires to `disabled` list).
+
+Silences are enforced on webhook intake before dedup and LLM. Silenced alerts increment `alerts_silenced` on the dashboard.
 
 ---
 
@@ -113,7 +129,9 @@ Next.js dashboard (`web/`, port 3000) for configuring and monitoring the agent w
 | **Config → AI Provider** | Provider, model, API key, LLM on/off |
 | **Config → Service Endpoints** | Prometheus / Loki URLs with health checks |
 | **Config → Storage** | Logs dir, dedup TTL, allowlist regex, catalog/routing paths |
-| **Routing** | Visual editor for `routing.yaml` rules |
+| **Routing** | Visual editor for `routing.yaml` rules (with mute time intervals per rule) |
+| **Time Intervals** | Named schedules for routing mute windows |
+| **Silences** | Active/disabled silence rules (skip LLM + Slack) |
 | **Logs** | Browse and view RCA / incoming log files |
 | **Reports** | 24h / 7d / 30d alert charts from Redis stream (`/api/reports/summary`) |
 
@@ -160,6 +178,7 @@ The agent exposes Prometheus metrics at `/metrics` and a Web UI stats API at `/a
 | `alert_agent_alerts_accepted_total` | Alerts that passed dedup and allowlist filters |
 | `alert_agent_alerts_skipped_total` | Alerts skipped (non-firing status or allowlist filter) |
 | `alert_agent_alerts_deduplicated_total` | Duplicate alerts suppressed |
+| `alert_agent_alerts_silenced_total` | Alerts suppressed by an active silence |
 | `alert_agent_llm_investigations_total` | LLM calls by outcome (success / fallback / error) |
 | `alert_agent_slack_posts_total` | Slack posts by outcome (success / error) |
 
@@ -169,8 +188,10 @@ Redis also stores the same counters for the Web UI dashboard and HA replicas.
 
 ### 9. Test Coverage
 
-96+ automated tests covering:
-- Alert routing (match/regex/first-match/fallback)
+119+ automated tests covering:
+- Alert routing (match/regex/first-match/fallback/mute-time-intervals)
+- Time interval evaluation (weekdays, overnight spans, timezones)
+- Silences (permanent, until, expiry pruning, webhook enforcement)
 - Slack formatting (header, body, truncation, color)
 - Alert context classification (pod vs host vs Kafka vs probe vs loki)
 - RCA formatting and deterministic fallback
@@ -195,7 +216,7 @@ Redis also stores the same counters for the Web UI dashboard and HA replicas.
 
 **Kubernetes:** `deploy/k8s/ai-alert-agent.yaml` includes the agent Deployment, logs PVC, **Redis Deployment + PVC + Service**, and `REDIS_URL` pointing at in-cluster Redis. No external queue.
 
-**HA:** Run 2+ agent replicas behind a load balancer with one shared Redis. Dedup, counters, config, and routing sync across replicas via Redis pub/sub (`config_sync.py`). Routing and runtime settings can be updated via the Web UI or `POST /api/config/routing` without restarting containers.
+**HA:** Run 2+ agent replicas behind a load balancer with one shared Redis. Dedup, counters, config, routing, time intervals, and silences sync across replicas via Redis pub/sub (`config_sync.py`). Routing and runtime settings can be updated via the Web UI or `POST /api/config/routing` without restarting containers.
 
 ---
 

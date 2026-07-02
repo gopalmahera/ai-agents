@@ -18,7 +18,11 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { ...init, headers });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error ?? `HTTP ${res.status}`);
+    const message =
+      Array.isArray(err.details) && err.details.length
+        ? err.details.join(" ")
+        : err.error ?? `HTTP ${res.status}`;
+    throw new Error(message);
   }
   return res.json() as Promise<T>;
 }

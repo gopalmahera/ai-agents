@@ -39,10 +39,11 @@ Slack channel  (routed by routing.yaml)
 ```
 
 1. Alertmanager fires → `POST /webhook`
-2. Alert is classified by resource type: `kubernetes`, `host`, `probe`, `kafka`
-3. The LLM agent queries live MCP tools (pod events, Prometheus metrics, Loki logs, Kafka lag)
-4. Produces a structured RCA with **Findings**, **Probable Root Cause**, and **Recommended Actions**
-5. Posts the report to the configured Slack channel via `routing.yaml` rules
+2. Allowlist filter → **silence check** (skip LLM + Slack if matched) → dedup
+3. Alert is classified by resource type: `kubernetes`, `host`, `probe`, `kafka`
+4. The LLM agent queries live MCP tools (pod events, Prometheus metrics, Loki logs, Kafka lag)
+5. Produces a structured RCA with **Findings**, **Probable Root Cause**, and **Recommended Actions**
+6. Posts the report to the configured Slack channel via `routing.yaml` rules (with optional **mute time intervals** per route)
 
 ---
 
@@ -118,11 +119,13 @@ Next.js dashboard (`web/`) for configuring and monitoring the agent without edit
 
 | Page | Purpose |
 |---|---|
-| **Dashboard** | Stat cards (received / accepted / deduplicated / LLM outcomes), MCP + Redis health |
+| **Dashboard** | Stat cards (received / accepted / deduplicated / silenced / LLM outcomes), MCP + Redis health |
 | **Config → AI Provider** | Provider (`openai` / `anthropic` / `gemini` / `bedrock` / `fake`), model, API key, LLM on/off |
 | **Config → Service Endpoints** | Direct data-source endpoints (`PROMETHEUS_URL`, `LOKI_URL`) with health checks; read-only status of the internal MCP servers |
 | **Config → Storage** | Logs dir, dedup TTL, allowed alertnames regex, catalog/routing paths |
 | **Routing** | Visual editor for `routing.yaml` rules |
+| **Time Intervals** | Named schedules for routing mute windows (Alertmanager-style) |
+| **Silences** | Silence rules that skip LLM + Slack for matching alerts |
 | **Logs** | Browse and view RCA / incoming log files |
 | **Reports** | 24h / 7d / 30d alert charts and per-alertname tables (from Redis stream) |
 
@@ -139,6 +142,10 @@ GET/POST /api/config                  read / update config (sensitive keys maske
 GET      /api/config/mcp/health       health of the 4 MCP servers
 GET      /api/config/services/health  health of Prometheus / Loki direct endpoints
 GET/POST /api/config/routing          routing.yaml as JSON
+GET/POST /api/config/time-intervals     named time intervals as JSON
+GET/POST /api/config/mute             silences (active + disabled) as JSON
+POST     /api/config/mute/silences/{id}/disable   manually disable a silence
+POST     /api/config/mute/silences/{id}/enable    re-enable from disabled list
 GET      /api/metrics/stats           counters from Redis
 GET      /api/reports/summary?days=7  aggregated alert history from Redis stream
 GET      /api/logs, /api/logs/{name}  log file browser
@@ -162,6 +169,8 @@ All runtime state lives in Redis (`redis_data` volume, AOF persistence) — it s
 | Alert event history | Redis Stream `stream:alerts` (capped at 50k events) — powers the Reports page |
 | Runtime config | Hash `config:store` + version counter `config:version` |
 | Routing rules | String `config:routing_yaml` (YAML text) |
+| Time intervals | String `config:time_intervals_yaml` (YAML text) |
+| Silences | String `config:silences_yaml` (YAML text) |
 
 Redis is a hard dependency at runtime — `docker compose` starts it automatically with a healthcheck before the agent.
 
@@ -190,6 +199,7 @@ The agent is HA-ready: run 2+ `alert-agent` replicas behind a load balancer with
   3. A version poll every 30 s catches any pub/sub message missed during a Redis reconnect.
   4. On startup, a replica applies the stored config immediately — new or restarted replicas converge without intervention.
 - **Routing rules sync the same way** — saved to `config:routing_yaml` in Redis and broadcast; each replica resets its routing cache on the event. The local `routing.yaml` file is only a fallback when Redis has no rules.
+- **Time intervals and silences sync the same way** — `config:time_intervals_yaml` and `config:silences_yaml` are broadcast on save; replicas reset their caches via `config_sync.py`.
 - **`web_config.json` is a seed/mirror** — it populates Redis on first boot (migration from single-node setups) and keeps local dev working; Redis is the source of truth once running.
 
 If Redis is briefly unavailable, replicas keep serving with their last-applied config and reconnect automatically.
@@ -212,25 +222,82 @@ routes:
       stage: prod
     slack_webhook_url: "https://hooks.slack.com/services/CRITICAL/..."
 
+  # Mute overnight — skip this route during night_hours, try next rule
+  - match:
+      severity: warning
+      stage: prod
+    slack_webhook_url: "https://hooks.slack.com/services/WARNING/..."
+    mute_time_intervals:
+      - night_hours
+
   # All EC2 / infra alerts → #infra-alerts
   - match_re:
       alertname: "^EC2Host.*"
     slack_webhook_url: "https://hooks.slack.com/services/INFRA/..."
-
-  # Kafka alerts → #kafka-alerts
-  - match_re:
-      alertname: "^(msk\\.|NetworkKafka).*"
-    slack_webhook_url: "https://hooks.slack.com/services/KAFKA/..."
 ```
 
 **Rules:**
-- Evaluated **top-to-bottom**; first match wins
+- Evaluated **top-to-bottom**; first non-muted match wins
 - `match` — exact label equality (all keys must match, AND logic)
 - `match_re` — regex per label value
-- Both can be combined in one rule
+- `mute_time_intervals` — when any named interval is active, skip this route and evaluate the next one (intervals defined in `config/time_intervals.yaml` or the Web UI)
+- Both matchers can be combined in one rule
 - Falls back to `default_slack_webhook_url`, then `SLACK_WEBHOOK_URL` env var
 
-The file is **volume-mounted** in docker-compose for local dev. In Kubernetes the catalog ships in the container image at `/app/config/alert_catalog.yaml`. For zero-downtime routing updates, use the **Web UI** or `POST /api/config/routing` (Redis-backed hot-reload).
+The file is **volume-mounted** in docker-compose for local dev. For zero-downtime routing updates, use the **Web UI** or `POST /api/config/routing` (Redis-backed hot-reload).
+
+---
+
+## Time Intervals
+
+Named schedules (Alertmanager-style) used by **routing rules** to mute Slack notifications during specific windows — e.g. overnight hours, weekends, maintenance windows.
+
+Config file: `config/time_intervals.yaml` (also stored in Redis as `config:time_intervals_yaml`).
+
+```yaml
+# config/time_intervals.yaml
+
+time_intervals:
+  - name: night_hours
+    time_intervals:
+      - weekdays: [monday, tuesday, wednesday, thursday, friday]
+        times:
+          - start_time: "22:00"
+            end_time: "06:00"
+        location: Asia/Kolkata
+```
+
+Manage via the **Web UI** (`/time-intervals`) or `GET/POST /api/config/time-intervals`. Interval names are referenced from routing rules as `mute_time_intervals`.
+
+---
+
+## Silences
+
+Silences suppress **LLM investigation and Slack posting** entirely for alerts matching label matchers — useful during planned maintenance or known incidents.
+
+Config file: `config/silences.yaml` (also stored in Redis as `config:silences_yaml`).
+
+```yaml
+# config/silences.yaml
+
+silences:
+  active:
+    - id: kafka-maintenance
+      comment: Kafka cluster upgrade
+      mode: until
+      ends_at: "2026-07-03T06:00:00Z"
+      match:
+        alertname: NetworkKafkaConsumerLag
+  disabled: []
+```
+
+**Modes:**
+- `permanent` — active until manually disabled
+- `until` — active until `ends_at` (expired silences move to `disabled` automatically)
+
+Manage via the **Web UI** (`/silences`) or `GET/POST /api/config/mute`. Silences are checked on webhook intake **before** dedup and LLM — silenced alerts increment the `alerts_silenced` counter.
+
+> **Note:** Time intervals and silences are separate modules. Use **time intervals** on routing rules to mute Slack for specific routes; use **silences** to skip investigation entirely.
 
 ---
 
@@ -398,7 +465,11 @@ ai-agents/
 │   │   ├── classification/           # Alert type classification + context building
 │   │   ├── llm/                      # PydanticAI agent, deterministic RCA fallback
 │   │   ├── metrics/                  # Prometheus prefetch (pod/host/kafka metrics)
-│   │   ├── notification/             # Slack client + routing.yaml engine
+│   │   ├── notification/             # Slack client, routing, silences, time intervals
+│   │   │   ├── routing.py            #   routing.yaml engine + mute_time_intervals
+│   │   │   ├── silences.py           #   silence matching (skip LLM + Slack)
+│   │   │   ├── time_intervals.py     #   weekday/time/timezone evaluation
+│   │   │   └── time_intervals_store.py
 │   │   ├── store/redis_client.py     # Redis: dedup, counters, alert stream
 │   │   └── config_store.py           # web_config.json read/write + live apply
 │   ├── views/
@@ -409,10 +480,15 @@ ai-agents/
 │   ├── routing.yaml                  # Slack routing rules (edit this)
 │   └── prompts/rca_prompt.txt        # LLM system prompt with tool hints
 ├── web/                              # Next.js 14 config dashboard
-│   ├── app/                          #   dashboard, config/*, routing, logs, reports
+│   ├── app/                          #   dashboard, config/*, routing, time-intervals, silences, logs, reports
 │   ├── components/                   #   shell (top navbar), UI primitives
 │   ├── lib/                          #   API client + shared types
 │   └── Dockerfile                    #   multi-stage standalone build
+├── config/                           # Volume-mounted shared config
+│   ├── web_config.json               #   runtime settings (seed for Redis)
+│   ├── alert_catalog.yaml            #   alert descriptions + runbooks
+│   ├── time_intervals.yaml           #   named mute schedules for routing
+│   └── silences.yaml                 #   active/disabled silence rules
 ├── mcp-servers/
 │   ├── k8s-mcp/server.py             # Kubernetes MCP server
 │   ├── prometheus-mcp/server.py      # Prometheus MCP server
@@ -421,7 +497,6 @@ ai-agents/
 ├── deploy/
 │   ├── k8s/ai-alert-agent.yaml       # Kubernetes manifests
 │   └── build-push.sh                 # ECR build + push script
-├── config/                           # Volume-mounted: web_config.json lives here
 ├── sample/                           # Sample Alertmanager payloads for testing
 ├── Dockerfile
 ├── docker-compose.yml

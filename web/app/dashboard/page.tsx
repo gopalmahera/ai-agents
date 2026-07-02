@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { MetricsStats, McpHealth } from "@/lib/types";
-import { Activity, CheckCircle, XCircle, Zap, AlertTriangle, RefreshCw, Database } from "lucide-react";
+import { Activity, CheckCircle, XCircle, Zap, AlertTriangle, RefreshCw, Database, BellOff } from "lucide-react";
 
 function StatCard({ label, value, icon: Icon, sub }: {
   label: string; value: number | string; icon: React.ElementType; sub?: string;
@@ -93,13 +93,13 @@ export default function DashboardPage() {
       </div>
 
       {isLoading ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          {Array.from({ length: 4 }).map((_, i) => (
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+          {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="card h-24 animate-pulse bg-slate-100 dark:bg-slate-800" />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
           <StatCard label="Alerts Received" value={stats?.alerts_received ?? 0} icon={Activity} />
           <StatCard label="Alerts Accepted" value={stats?.alerts_accepted ?? 0} icon={CheckCircle} />
           <StatCard
@@ -114,6 +114,7 @@ export default function DashboardPage() {
             icon={AlertTriangle}
             sub={`${stats?.alerts_skipped ?? 0} skipped`}
           />
+          <StatCard label="Silenced" value={stats?.alerts_silenced ?? 0} icon={BellOff} />
         </div>
       )}
 

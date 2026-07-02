@@ -16,6 +16,8 @@ const NAV = [
     ],
   },
   { href: "/routing", label: "Routing" },
+  { href: "/time-intervals", label: "Time Intervals" },
+  { href: "/silences", label: "Silences" },
   { href: "/logs", label: "Logs" },
   { href: "/reports", label: "Reports" },
 ];

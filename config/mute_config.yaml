@@ -1,0 +1,18 @@
+silences:
+  active: []
+  disabled:
+  - disabled_at: '2026-07-02T07:21:36.297106Z'
+    disabled_reason: manual
+    ends_at: '2026-07-02T08:19:49.817351Z'
+    id: future
+    match:
+      stage: prod
+    mode: until
+  - disabled_at: '2026-07-02T07:19:49.817398Z'
+    disabled_reason: expired
+    ends_at: '2026-07-02T06:19:49.817355Z'
+    id: past
+    match:
+      stage: sit
+    mode: until
+time_intervals: []

@@ -14,6 +14,10 @@ alerts_skipped = Counter(
     "alert_agent_alerts_skipped_total",
     "Alerts skipped (non-firing status or filtered by allowlist)",
 )
+alerts_silenced = Counter(
+    "alert_agent_alerts_silenced_total",
+    "Alerts suppressed by an active silence rule",
+)
 alerts_accepted = Counter(
     "alert_agent_alerts_accepted_total",
     "Alerts accepted and queued for investigation",

@@ -3,7 +3,6 @@ import traceback
 
 from services.classification.alert_classifier import build_alert_context
 import config as _cfg
-from config import LLM_ENABLED
 from services.llm.deterministic_rca import build_deterministic_rca
 from services.metrics.prefetch import build_prefetch
 from views.report_view import save_rca
@@ -12,6 +11,7 @@ from views.slack_view import format_rca, format_report_header
 from services.notification.slack_client import send_alert_report
 import services.store.redis_client as _redis
 from utils.metrics import llm_investigations, slack_posts
+from services.notification import silences as _silences
 from utils.log import get_logger
 
 logger = get_logger(__name__)
@@ -73,7 +73,7 @@ def _attach_recurrence(alert: dict) -> dict:
 
 
 def _run_rca(alert: dict, ctx, prefetched) -> str:
-    if not LLM_ENABLED:
+    if not _cfg.LLM_ENABLED:
         _record_llm_outcome("fallback")
         return build_deterministic_rca(ctx, prefetched)
 
@@ -148,6 +148,19 @@ def investigate_alert(alert: dict, *, skip_slack: bool = False) -> dict | None:
         logger.info(
             "Skipping non-firing alert",
             extra={"alertname": alertname, "outcome": status, "event": "alert_skipped"},
+        )
+        return None
+
+    silenced, silence_id = _silences.is_silenced(labels)
+    if silenced:
+        logger.info(
+            "Skipping silenced alert",
+            extra={
+                "alertname": alertname,
+                "silence_id": silence_id,
+                "outcome": "silenced",
+                "event": "alert_silenced",
+            },
         )
         return None
 

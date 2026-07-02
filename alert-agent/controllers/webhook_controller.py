@@ -12,8 +12,10 @@ from utils.metrics import (
     alerts_received,
     alerts_deduplicated,
     alerts_skipped,
+    alerts_silenced,
     alerts_accepted,
 )
+from services.notification import silences as _silences
 from utils.log import get_logger
 
 logger = get_logger(__name__)
@@ -154,6 +156,29 @@ def create_app() -> Flask:
                 )
                 _redis.counter_inc("alerts_skipped")
                 alerts_skipped.inc()
+                continue
+
+            silenced, silence_id = _silences.is_silenced(labels)
+            if silenced:
+                logger.info(
+                    "Alert silenced",
+                    extra={
+                        "event": "alert_silenced",
+                        "alertname": alertname,
+                        "fingerprint": fingerprint,
+                        "silence_id": silence_id,
+                        "outcome": "silenced",
+                    },
+                )
+                _redis.counter_inc("alerts_silenced")
+                alerts_silenced.inc()
+                _redis.stream_add(
+                    alertname=alertname,
+                    outcome="silenced",
+                    namespace=labels.get("namespace", ""),
+                    fingerprint=fingerprint,
+                    extra={"silence_id": silence_id or ""},
+                )
                 continue
 
             if _is_duplicate(fingerprint):

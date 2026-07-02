@@ -17,7 +17,7 @@ sys.modules.setdefault("prometheus_client", _prom_stub)
 
 # Stub metrics module (avoids importing app.py which has its own chain).
 _metrics_stub = types.ModuleType("metrics")
-for _n in ("alerts_received", "alerts_deduplicated", "alerts_skipped", "alerts_accepted",
+for _n in ("alerts_received", "alerts_deduplicated", "alerts_skipped", "alerts_silenced", "alerts_accepted",
            "llm_investigations", "slack_posts"):
     setattr(_metrics_stub, _n, MagicMock())
 sys.modules["utils.metrics"] = _metrics_stub

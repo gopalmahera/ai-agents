@@ -9,7 +9,10 @@ stream:alerts                STREAM  one entry per accepted alert event
 config:store                 HASH    key → JSON value (shared runtime config)
 config:version               STRING  int, bumped on every config change
 config:routing_yaml          STRING  routing rules as YAML text
-config:events                PUBSUB  {"kind": "config"|"routing", "version": N}
+config:silences_yaml         STRING  silences as YAML text
+config:time_intervals_yaml STRING  named time intervals as YAML text
+config:mute_yaml             STRING  legacy combined mute config (migration only)
+config:events                PUBSUB  {"kind": "config"|"routing"|"silences"|"time_intervals", "version": N}
 """
 import json
 import os
@@ -129,6 +132,9 @@ def is_available() -> bool:
 _CONFIG_HASH = "config:store"
 _CONFIG_VERSION_KEY = "config:version"
 _ROUTING_YAML_KEY = "config:routing_yaml"
+_SILENCES_YAML_KEY = "config:silences_yaml"
+_TIME_INTERVALS_YAML_KEY = "config:time_intervals_yaml"
+_MUTE_YAML_KEY = "config:mute_yaml"  # legacy — read-only migration
 EVENTS_CHANNEL = "config:events"
 
 
@@ -170,3 +176,24 @@ def routing_yaml_load() -> str | None:
 
 def routing_yaml_save(yaml_text: str) -> None:
     get().set(_ROUTING_YAML_KEY, yaml_text)
+
+
+def silences_yaml_load() -> str | None:
+    return get().get(_SILENCES_YAML_KEY)
+
+
+def silences_yaml_save(yaml_text: str) -> None:
+    get().set(_SILENCES_YAML_KEY, yaml_text)
+
+
+def time_intervals_yaml_load() -> str | None:
+    return get().get(_TIME_INTERVALS_YAML_KEY)
+
+
+def time_intervals_yaml_save(yaml_text: str) -> None:
+    get().set(_TIME_INTERVALS_YAML_KEY, yaml_text)
+
+
+def mute_yaml_load() -> str | None:
+    """Legacy combined config — used only for one-time migration."""
+    return get().get(_MUTE_YAML_KEY)

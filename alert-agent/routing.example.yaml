@@ -6,6 +6,8 @@
 # Matchers (all optional, AND-ed together):
 #   match:     exact label equality  { key: value, ... }
 #   match_re:  regex label match     { key: regex, ... }
+#   mute_time_intervals: skip this route when named intervals are active
+#     (define intervals in config/time_intervals.yaml or the Web UI)
 #
 # The fallback `default_slack_webhook_url` is used when no rule matches
 # (or when this file is absent / the env var ROUTING_CONFIG_PATH is unset).

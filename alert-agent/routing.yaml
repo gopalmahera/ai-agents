@@ -1,2 +1,8 @@
 default_slack_webhook_url: ${SLACK_WEBHOOK_URL}
-routes: []
+routes:
+- match:
+    severity: critical
+    stage: prod
+  mute_time_intervals:
+  - offpick
+  slack_webhook_url: ${SLACK_WEBHOOK_URL}

@@ -10,7 +10,9 @@ Next.js 14 dashboard for configuring and monitoring the alert agent. Talks to th
 | `/config/ai` | AI provider, model, API key, LLM enable toggle |
 | `/config/mcp` | Direct service endpoints (Prometheus, Loki) + MCP server URLs, health checks |
 | `/config/storage` | Logs dir, dedup TTL, allowed alertnames, catalog/routing paths |
-| `/routing` | Visual editor for `routing.yaml` Slack routing rules |
+| `/routing` | Visual editor for `routing.yaml` Slack routing rules (with mute time intervals per rule) |
+| `/time-intervals` | Named schedules for routing mute windows (weekdays, times, timezone) |
+| `/silences` | Active/disabled silence rules — skip LLM + Slack for matching alerts |
 | `/logs` | Browse and view RCA / incoming log files |
 | `/reports` | Alert charts and tables (24h / 7d / 30d) from Redis stream |
 
@@ -21,6 +23,7 @@ Next.js 14 dashboard for configuring and monitoring the alert agent. Talks to th
 - **TanStack Query v5** for server state
 - **Recharts** for charts
 - **lucide-react** icons
+- **js-yaml** for YAML preview on routing, time intervals, and silences pages
 
 ## Local Development
 
@@ -53,6 +56,8 @@ app/
 ├── dashboard/        # Stat cards + health
 ├── config/           # ai / mcp / storage pages
 ├── routing/          # routing.yaml editor
+├── time-intervals/   # time_intervals.yaml editor
+├── silences/         # silences.yaml editor
 ├── logs/             # log browser
 └── reports/          # charts + tables
 components/
@@ -60,5 +65,21 @@ components/
 └── ui/               # shared primitives
 lib/
 ├── api.ts            # fetch client (injects Authorization header)
+├── routing-validation.ts
+├── routing-yaml.ts
+├── time-intervals-validation.ts
+├── time-intervals-yaml.ts
+├── silences-validation.ts
+├── silences-yaml.ts
 └── types.ts          # API response types
 ```
+
+## Related API Endpoints
+
+| Endpoint | Purpose |
+|---|---|
+| `GET/POST /api/config/routing` | Routing rules |
+| `GET/POST /api/config/time-intervals` | Named time intervals |
+| `GET/POST /api/config/mute` | Silences (active + disabled) |
+| `POST /api/config/mute/silences/{id}/disable` | Manually disable a silence |
+| `POST /api/config/mute/silences/{id}/enable` | Re-enable from disabled list |

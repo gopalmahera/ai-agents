@@ -9,6 +9,11 @@ import services.store.redis_client as _redis
 from api.auth import require_auth
 from services.config_store import get_masked, update
 from services.notification import routing as _routing
+from services.notification.routing_validation import validate_routing_body
+from services.notification import silences as _silences
+from services.notification import time_intervals_store as _time_intervals_store
+from services.notification.silences_validation import validate_silences_body
+from services.notification.time_intervals_validation import validate_time_intervals_body
 
 bp = Blueprint("config_api", __name__, url_prefix="/api/config")
 
@@ -136,6 +141,11 @@ def get_routing():
 def post_routing():
     """Save routing rules to Redis and broadcast to all replicas."""
     body = request.get_json(silent=True) or {}
+    interval_names = _time_intervals_store.get_interval_names()
+    errors = validate_routing_body(body, interval_names=interval_names)
+    if errors:
+        return jsonify({"error": "Validation failed", "details": errors}), 400
+
     yaml_text = yaml.safe_dump(body, default_flow_style=False, allow_unicode=True)
 
     redis_ok = False
@@ -163,3 +173,112 @@ def post_routing():
 
     _routing.reset_cache()
     return jsonify({"status": "ok", "synced": redis_ok})
+
+
+@bp.get("/time-intervals")
+@require_auth
+def get_time_intervals():
+    """Named time intervals for routing mute windows."""
+    try:
+        return jsonify(_time_intervals_store.get_config())
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@bp.post("/time-intervals")
+@require_auth
+def post_time_intervals():
+    body = request.get_json(silent=True) or {}
+    errors = validate_time_intervals_body(body)
+    if errors:
+        return jsonify({"error": "Validation failed", "details": errors}), 400
+    try:
+        _time_intervals_store.save_config(body)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+    return jsonify({"status": "ok"})
+
+
+@bp.get("/mute")
+@require_auth
+def get_mute():
+    """Silences (active + disabled)."""
+    try:
+        return jsonify(_silences.get_config())
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@bp.post("/mute")
+@require_auth
+def post_mute():
+    body = request.get_json(silent=True) or {}
+    errors = validate_silences_body(body)
+    if errors:
+        return jsonify({"error": "Validation failed", "details": errors}), 400
+    try:
+        _silences.save_config(body)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+    return jsonify({"status": "ok"})
+
+
+@bp.post("/mute/silences/<silence_id>/disable")
+@require_auth
+def disable_silence(silence_id: str):
+    from datetime import datetime, timezone
+
+    cfg = _silences.get_config()
+    active = cfg.get("silences", {}).get("active", [])
+    disabled = cfg.get("silences", {}).get("disabled", [])
+    kept = []
+    found = None
+    for rule in active:
+        if rule.get("id") == silence_id:
+            found = dict(rule)
+        else:
+            kept.append(rule)
+    if not found:
+        return jsonify({"error": "Silence not found in active list"}), 404
+    found["disabled_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    found["disabled_reason"] = "manual"
+    cfg["silences"]["active"] = kept
+    cfg["silences"]["disabled"] = [found, *disabled]
+    errors = validate_silences_body(cfg, require_future_ends_at=False)
+    if errors:
+        return jsonify({"error": "Validation failed", "details": errors}), 400
+    _silences.save_config(cfg)
+    return jsonify({"status": "ok"})
+
+
+@bp.post("/mute/silences/<silence_id>/enable")
+@require_auth
+def enable_silence(silence_id: str):
+    body = request.get_json(silent=True) or {}
+    cfg = _silences.get_config()
+    active = cfg.get("silences", {}).get("active", [])
+    disabled = cfg.get("silences", {}).get("disabled", [])
+    kept_disabled = []
+    found = None
+    for rule in disabled:
+        if rule.get("id") == silence_id:
+            found = dict(rule)
+        else:
+            kept_disabled.append(rule)
+    if not found:
+        return jsonify({"error": "Silence not found in disabled list"}), 404
+
+    mode = (body.get("mode") or found.get("mode") or "permanent").strip().lower()
+    found["mode"] = mode
+    if mode == "until":
+        found["ends_at"] = body.get("ends_at") or found.get("ends_at")
+    found.pop("disabled_at", None)
+    found.pop("disabled_reason", None)
+
+    cfg["silences"]["active"] = [*active, found]
+    cfg["silences"]["disabled"] = kept_disabled
+    errors = validate_silences_body(cfg)
+    if errors:
+        return jsonify({"error": "Validation failed", "details": errors}), 400
+    _silences.save_config(cfg)
+    return jsonify({"status": "ok"})
