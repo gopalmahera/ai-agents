@@ -1,36 +1,64 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI Alert Agent — Web Config UI
 
-## Getting Started
+Next.js 14 dashboard for configuring and monitoring the alert agent. Talks to the Flask backend's `/api/*` endpoints.
 
-First, run the development server:
+## Pages
+
+| Route | Purpose |
+|---|---|
+| `/dashboard` | Stat cards, MCP server status, Redis status |
+| `/config/ai` | AI provider, model, API key, LLM enable toggle |
+| `/config/mcp` | Direct service endpoints (Prometheus, Loki) + MCP server URLs, health checks |
+| `/config/storage` | Logs dir, dedup TTL, allowed alertnames, catalog/routing paths |
+| `/routing` | Visual editor for `routing.yaml` Slack routing rules |
+| `/logs` | Browse and view RCA / incoming log files |
+| `/reports` | Alert charts and tables (24h / 7d / 30d) from Redis stream |
+
+## Stack
+
+- **Next.js 14** (App Router) + TypeScript
+- **Tailwind CSS** (`darkMode: "class"`, slate palette, indigo primary `#4F46E5`)
+- **TanStack Query v5** for server state
+- **Recharts** for charts
+- **lucide-react** icons
+
+## Local Development
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev          # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Environment variables (set at build time — `NEXT_PUBLIC_*` are inlined):
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Variable | Default | Description |
+|---|---|---|
+| `NEXT_PUBLIC_API_URL` | `http://localhost:5001` | Flask backend base URL |
+| `NEXT_PUBLIC_ADMIN_TOKEN` | _(empty)_ | Bearer token sent to `/api/*` (must match backend `ADMIN_TOKEN`) |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Docker
 
-## Learn More
+Multi-stage build ([Dockerfile](Dockerfile)) using Next.js `output: "standalone"`. Built and run automatically as the `web` service in the root `docker-compose.yml`:
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+docker compose up --build web
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Layout
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+app/
+├── layout.tsx        # Root layout — Providers + Shell
+├── providers.tsx     # TanStack Query client
+├── dashboard/        # Stat cards + health
+├── config/           # ai / mcp / storage pages
+├── routing/          # routing.yaml editor
+├── logs/             # log browser
+└── reports/          # charts + tables
+components/
+├── shell/Shell.tsx   # Top navbar, config dropdown, mobile drawer, theme toggle
+└── ui/               # shared primitives
+lib/
+├── api.ts            # fetch client (injects Authorization header)
+└── types.ts          # API response types
+```

@@ -15,23 +15,25 @@ The stack has three services (via `docker compose`):
 ## How It Works
 
 ```
-Alertmanager
-    │
-    │  POST /webhook
-    ▼
+Alertmanager                        Web UI (Next.js :3000)
+    │                                   │
+    │  POST /webhook                    │  /api/config, /api/metrics, /api/logs
+    ▼                                   ▼
 ┌─────────────────────────────────────────────────────┐
 │                  alert-agent container               │
 │                                                     │
 │  Flask webhook  ──►  Classify alert by type         │
 │                           │                         │
 │                           ▼                         │
-│                   PydanticAI Agent (GPT-4o)         │
+│              PydanticAI Agent (OpenAI/Anthropic/    │
+│                    Gemini/Bedrock)                  │
 │                    │    │    │    │                  │
 │               k8s  prom loki kafka  ◄── MCP servers │
 │              :8001 :8002 :8003 :8004                │
-└─────────────────────────────────────────────────────┘
-    │
-    │  RCA report
+└──────────────┬──────────────────────────────────────┘
+    │          │
+    │          ▼
+    │        Redis (:6379) — dedup, counters, alert history
     ▼
 Slack channel  (routed by routing.yaml)
 ```
@@ -98,6 +100,58 @@ curl -X POST http://localhost:5001/webhook \
 # Prometheus metrics
 curl http://localhost:5001/metrics
 ```
+
+### 5. Open the Web UI
+
+Visit **http://localhost:3000** — dashboard, config pages, routing editor, log browser, and reports.
+
+---
+
+## Web Config UI
+
+Next.js dashboard (`web/`) for configuring and monitoring the agent without editing env files:
+
+| Page | Purpose |
+|---|---|
+| **Dashboard** | Stat cards (received / accepted / deduplicated / LLM outcomes), MCP + Redis health |
+| **Config → AI Provider** | Provider (`openai` / `anthropic` / `gemini` / `bedrock` / `fake`), model, API key, LLM on/off |
+| **Config → MCP & Services** | Direct endpoints (`PROMETHEUS_URL`, `LOKI_URL`) and MCP server URLs, with per-section health checks |
+| **Config → Storage** | Logs dir, dedup TTL, allowed alertnames regex, catalog/routing paths |
+| **Routing** | Visual editor for `routing.yaml` rules |
+| **Logs** | Browse and view RCA / incoming log files |
+| **Reports** | 24h / 7d / 30d alert charts and per-alertname tables (from Redis stream) |
+
+Changes are saved to `config/web_config.json` (volume-mounted) and applied to the live process — no restart needed for most settings. Precedence: **env var > web_config.json > default**.
+
+**Auth:** set `ADMIN_TOKEN` to require `Authorization: Bearer <token>` on all `/api/*` endpoints. If unset, auth is skipped (dev mode).
+
+### API Endpoints
+
+```
+GET/POST /api/config                  read / update config (sensitive keys masked)
+GET      /api/config/mcp/health       health of the 4 MCP servers
+GET      /api/config/services/health  health of Prometheus / Loki direct endpoints
+GET/POST /api/config/routing          routing.yaml as JSON
+GET      /api/metrics/stats           counters from Redis
+GET      /api/reports/summary?days=7  aggregated alert history from Redis stream
+GET      /api/logs, /api/logs/{name}  log file browser
+GET      /api/redis/health            Redis availability
+```
+
+---
+
+## Persistence (Redis)
+
+All runtime state lives in Redis (`redis_data` volume, AOF persistence) — it survives container restarts:
+
+| Data | Mechanism |
+|---|---|
+| Dedup cache | `SET NX EX` per alert fingerprint (atomic, TTL = `DEDUP_TTL_SECONDS`) |
+| Counters | `INCRBY` (`alerts_received`, `llm_success`, `slack_error`, …) |
+| Per-alertname counts | `HINCRBY alertname:counts` |
+| Alert event history | Redis Stream `stream:alerts` (capped at 50k events) — powers the Reports page |
+
+Redis is a hard dependency at runtime — `docker compose` starts it automatically with a healthcheck before the agent.
 
 ---
 
@@ -171,10 +225,13 @@ Consumer thread pool saturated by a spike in Kafka message volume at 11:27 UTC.
 
 ## Environment Variables
 
+Most of these can also be set from the Web UI (saved to `web_config.json`). Explicit env vars always win.
+
 | Variable | Default | Description |
 |---|---|---|
-| `OPENAI_API_KEY` | _(required)_ | OpenAI API key |
-| `OPENAI_MODEL` | `gpt-4o` | Model to use |
+| `AI_PROVIDER` | `openai` | `openai` \| `anthropic` \| `gemini` \| `bedrock` \| `fake` |
+| `OPENAI_API_KEY` | _(required)_ | API key for the selected provider |
+| `OPENAI_MODEL` | `gpt-4o` | Model name (interpreted per provider) |
 | `SLACK_WEBHOOK_URL` | _(optional)_ | Fallback Slack webhook when no routing rule matches |
 | `ROUTING_CONFIG_PATH` | _(optional)_ | Path to `routing.yaml` inside the container |
 | `PROMETHEUS_URL` | cluster default | Prometheus base URL |
@@ -183,6 +240,10 @@ Consumer thread pool saturated by a spike in Kafka message volume at 11:27 UTC.
 | `DEDUP_TTL_SECONDS` | `900` | Ignore duplicate fingerprints for this many seconds |
 | `ALLOWED_ALERTNAMES` | _(unset = all)_ | Regex filter — only process matching alert names |
 | `LLM_ENABLED` | `true` | Set `false` to use deterministic RCA fallback only |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL (`redis://redis:6379/0` in compose) |
+| `ADMIN_TOKEN` | _(unset = no auth)_ | Bearer token required by `/api/*` and the Web UI |
+| `CONFIG_STORE_PATH` | `/app/config/web_config.json` | Where Web UI config is persisted |
+| `NEXT_PUBLIC_API_URL` | `http://alert-agent:5001` | Backend URL used by the Web UI |
 
 ---
 
@@ -239,7 +300,7 @@ Tools are exposed with prefixes (`k8s_`, `prom_`, `loki_`, `kafka_`) so the LLM 
 
 | Feature | Detail |
 |---|---|
-| **Deduplication** | Same alert `fingerprint` is ignored for `DEDUP_TTL_SECONDS` (default 15 min) |
+| **Deduplication** | Same alert `fingerprint` is ignored for `DEDUP_TTL_SECONDS` (default 15 min) — stored in Redis, survives restarts |
 | **Allowlist filter** | `ALLOWED_ALERTNAMES` regex — drop alerts not matching |
 | **LLM fallback** | If OpenAI is unavailable or quota exceeded, falls back to a deterministic RCA using prefetched metrics |
 | **Body truncation** | Slack body capped at 3,800 chars with a truncation notice |
@@ -256,61 +317,75 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt pytest
 
 # Run all tests
-PYTHONPATH=alert-agent .venv/bin/python -m pytest alert-agent/test_*.py -v
+PYTHONPATH=alert-agent .venv/bin/python -m pytest alert-agent/tests/ -v
 ```
 
 ---
 
 ## Project Structure
 
+The backend follows an MVC layout:
+
 ```
 ai-agents/
 ├── alert-agent/
-│   ├── app.py                  # Flask webhook server
-│   ├── agent.py                # Alert investigation orchestration
-│   ├── mcp_client.py           # PydanticAI agent + MCP toolset setup
-│   ├── alert_context.py        # Alert classification and context building
-│   ├── alert_catalog.py        # One-line alert descriptions (42 entries)
-│   ├── routing.py              # Slack channel routing engine
-│   ├── routing.yaml            # Routing rules (edit this)
-│   ├── routing.example.yaml    # Annotated example routing config
-│   ├── slack_client.py         # Slack posting with retry and truncation
-│   ├── report_header.py        # Rich Slack header formatting
-│   ├── rca_formatter.py        # RCA post-processing and formatting
-│   ├── deterministic_rca.py    # LLM-free fallback RCA
-│   ├── prefetch.py             # Pre-fetches metrics before LLM call
-│   ├── config.py               # Environment variable config
-│   ├── metrics.py              # Prometheus metrics (counters)
-│   ├── log_writer.py           # Saves RCA reports to disk
-│   └── prompts/
-│       └── rca_prompt.txt      # LLM system prompt with tool hints
+│   ├── app.py                        # Flask app — wires blueprints + webhook route
+│   ├── config.py                     # Environment variable config
+│   ├── api/                          # REST API for the Web UI
+│   │   ├── auth.py                   #   Bearer token auth (ADMIN_TOKEN)
+│   │   ├── config_api.py             #   /api/config, MCP + service health, routing
+│   │   ├── metrics_api.py            #   /api/metrics/stats, /api/reports/summary
+│   │   └── logs_api.py               #   /api/logs browser
+│   ├── controllers/
+│   │   ├── webhook_controller.py     # Webhook intake, dedup, filtering
+│   │   └── investigation_controller.py # RCA orchestration per alert
+│   ├── models/
+│   │   └── catalog.py                # Alert catalog (descriptions per alertname)
+│   ├── services/
+│   │   ├── classification/           # Alert type classification + context building
+│   │   ├── llm/                      # PydanticAI agent, deterministic RCA fallback
+│   │   ├── metrics/                  # Prometheus prefetch (pod/host/kafka metrics)
+│   │   ├── notification/             # Slack client + routing.yaml engine
+│   │   ├── store/redis_client.py     # Redis: dedup, counters, alert stream
+│   │   └── config_store.py           # web_config.json read/write + live apply
+│   ├── views/
+│   │   ├── report_view.py            # RCA report + header formatting
+│   │   └── slack_view.py             # Slack attachment layout
+│   ├── utils/metrics.py              # Prometheus /metrics exposition
+│   ├── tests/                        # pytest suite
+│   ├── routing.yaml                  # Slack routing rules (edit this)
+│   └── prompts/rca_prompt.txt        # LLM system prompt with tool hints
+├── web/                              # Next.js 14 config dashboard
+│   ├── app/                          #   dashboard, config/*, routing, logs, reports
+│   ├── components/                   #   shell (top navbar), UI primitives
+│   ├── lib/                          #   API client + shared types
+│   └── Dockerfile                    #   multi-stage standalone build
 ├── mcp-servers/
-│   ├── k8s-mcp/server.py       # Kubernetes MCP server
-│   ├── prometheus-mcp/server.py# Prometheus MCP server
-│   ├── loki-mcp/server.py      # Loki MCP server
-│   └── kafka-mcp/server.py     # Kafka/MSK MCP server
+│   ├── k8s-mcp/server.py             # Kubernetes MCP server
+│   ├── prometheus-mcp/server.py      # Prometheus MCP server
+│   ├── loki-mcp/server.py            # Loki MCP server
+│   └── kafka-mcp/server.py           # Kafka/MSK MCP server
 ├── deploy/
-│   ├── k8s/ai-alert-agent.yaml # Kubernetes manifests
-│   └── build-push.sh           # ECR build + push script
-├── sample/                     # Sample Alertmanager payloads for testing
+│   ├── k8s/ai-alert-agent.yaml       # Kubernetes manifests
+│   └── build-push.sh                 # ECR build + push script
+├── config/                           # Volume-mounted: web_config.json lives here
+├── sample/                           # Sample Alertmanager payloads for testing
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
-└── start.sh                    # Container entrypoint
+└── start.sh                          # Container entrypoint
 ```
 
 ---
 
 ## Future Improvements
 
-- **Persistent dedup store** — replace in-memory dedup with Redis/SQLite so restarts don't re-trigger investigations
 - **Alert queue** — bounded work queue instead of unbounded threads to handle alert storms gracefully
 - **Runbook links** — add `runbook_url` per alert in catalog; append to every RCA
 - **Multi-alert correlation** — group alerts firing on the same node/namespace into a single RCA
 - **Historical comparison** — compare current metric values against 7-day baselines to flag recurring issues
 - **Confidence score** — LLM rates certainty (low/medium/high); low-confidence RCAs flagged in Slack
 - **`/webhook/test` endpoint** — synchronous RCA without Slack post, for local testing and CI
-- **`routing.yaml` hot-reload** — reload routes without container restart (`POST /reload` endpoint)
 - **Structured JSON logs** — replace `print()` with structured logging for Loki/CloudWatch ingestion
 - **Grafana dashboard** — visualize `alerts_received`, `llm_investigations`, `slack_posts` with latency histograms
 - **Multi-tenant routing** — route different alert groups to different OpenAI keys or models (e.g. GPT-4o-mini for `info` severity)
