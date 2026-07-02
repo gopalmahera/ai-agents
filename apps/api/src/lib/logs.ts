@@ -1,5 +1,5 @@
-import fs from "fs";
-import path from "path";
+import * as fs from "fs";
+import * as path from "path";
 
 const LOGS_DIR = process.env.LOGS_DIR || "/app/logs";
 const TS_RE = /^(\d{8}T\d{6}Z)/;

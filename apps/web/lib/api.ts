@@ -1,7 +1,8 @@
 /**
- * API client — calls NestJS API at NEXT_PUBLIC_API_URL.
+ * API client — calls NestJS API. Uses NEXT_PUBLIC_API_URL when set; otherwise
+ * same-origin requests are proxied to the API via next.config.mjs rewrites.
  */
-const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/$/, "");
+const BASE = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
 const TOKEN = process.env.NEXT_PUBLIC_ADMIN_TOKEN || "";
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -11,7 +12,15 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
     ...(init?.headers as Record<string, string> | undefined),
   };
-  const res = await fetch(url, { ...init, headers });
+  let res: Response;
+  try {
+    res = await fetch(url, { ...init, headers });
+  } catch {
+    const hint = BASE
+      ? `Could not reach API at ${BASE}. Is the API service running?`
+      : "Could not reach API. Is the API service running?";
+    throw new Error(hint);
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     const message =
